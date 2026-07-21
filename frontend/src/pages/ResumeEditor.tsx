@@ -38,9 +38,10 @@ export function ResumeEditor() {
   const [coaching, setCoaching] = useState(false)
   const [dirty, setDirty] = useState(false)
   const [hasPdf, setHasPdf] = useState(false)
-  const [showPreview, setShowPreview] = useState(false)
+  const [showPreview, setShowPreview] = useState(true)
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const [previewBusy, setPreviewBusy] = useState(false)
+  const [engine, setEngine] = useState<string>('')
   const previewUrlRef = useRef<string | null>(null)
   const compilingRef = useRef(false)
 
@@ -66,8 +67,8 @@ export function ResumeEditor() {
   useEffect(() => {
     void load()
     revokePreview()
-    setShowPreview(false)
     setHasPdf(false)
+    setShowPreview(true)
   }, [id])
 
   async function save() {
@@ -113,16 +114,19 @@ export function ResumeEditor() {
           setResume(r)
           setDirty(false)
         }
-        const out = await api<{ message: string; pdf_key?: string; bytes?: number }>(
-          `/resumes/${id}/compile`,
-          { method: 'POST' },
-        )
+        const out = await api<{
+          message: string
+          pdf_key?: string
+          bytes?: number
+          engine?: string
+        }>(`/resumes/${id}/compile`, { method: 'POST' })
         setShowPreview(true)
+        setEngine(out.engine || '')
         await loadPreviewBlob()
         setStatus(
-          `Preview updated${out.bytes ? ` · ${out.bytes} bytes` : ''} · letter layout with 0.75″ margins`,
+          `${out.message}${out.bytes ? ` · ${out.bytes} B` : ''}${out.engine ? ` · ${out.engine}` : ''}`,
         )
-        if (!opts?.quiet) toast.push('Preview ready')
+        if (!opts?.quiet) toast.push(out.engine === 'tectonic' ? 'TeX preview ready' : 'Preview ready')
       } catch (ex) {
         setStatus(ex instanceof Error ? ex.message : 'Compile failed')
         if (!opts?.quiet) toast.push(ex instanceof Error ? ex.message : 'Compile failed')
@@ -134,14 +138,12 @@ export function ResumeEditor() {
     [dirty, id, latex, loadPreviewBlob, resume?.track, structured, title, toast],
   )
 
-  // Live preview: recompile when content changes while preview is open
   useEffect(() => {
     if (!showPreview || !resume) return
     const t = window.setTimeout(() => {
       void compileAndPreview({ quiet: true })
     }, 900)
     return () => window.clearTimeout(t)
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional debounce on content
   }, [latex, structured, title, showPreview])
 
   async function downloadPdf() {
@@ -241,252 +243,210 @@ export function ResumeEditor() {
   const overall = job?.result_json?.overall_score
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div className="min-w-0 flex-1">
-          <Link to="/" className="text-sm text-[var(--color-muted)] hover:text-[var(--color-text)]">
-            ← Resumes
-          </Link>
-          <div className="mt-2 flex flex-wrap items-center gap-2">
-            <input
-              className="input max-w-md font-display text-xl font-semibold tracking-tight sm:text-2xl py-1.5"
-              value={title}
-              onChange={(e) => {
-                setTitle(e.target.value)
-                setDirty(true)
-              }}
-              aria-label="Resume title"
-            />
-            <span className="chip">{resume.track}</span>
-            {dirty && <span className="text-xs text-[var(--color-warn)]">Unsaved</span>}
-          </div>
-          <p className="mt-1 font-mono text-xs text-[var(--color-muted)]">{resume.id.slice(0, 13)}…</p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <button type="button" onClick={() => void save()} className="btn btn-secondary">
-            Save
-          </button>
-          <button
-            type="button"
-            onClick={() => void compileAndPreview()}
-            className="btn btn-secondary"
-            disabled={previewBusy}
-          >
-            {previewBusy ? 'Compiling…' : 'Compile & preview'}
-          </button>
-          <button
-            type="button"
-            onClick={() => void downloadPdf()}
-            className="btn btn-secondary"
-            title="Download last compile"
-          >
-            Download PDF
-          </button>
-          <button type="button" onClick={() => void score()} className="btn btn-primary" disabled={scoring}>
-            {scoring ? 'Scoring…' : 'Re-check score'}
-          </button>
-          <button type="button" onClick={() => void remove()} className="btn btn-danger">
-            Delete
-          </button>
-        </div>
+    <div className="flex h-[calc(100vh-5.5rem)] flex-col gap-3">
+      {/* Thin header */}
+      <div className="flex shrink-0 flex-wrap items-center gap-3">
+        <Link to="/" className="text-sm text-[var(--color-muted)] hover:text-[var(--color-text)]">
+          ← Resumes
+        </Link>
+        <input
+          className="input max-w-sm font-display text-lg font-semibold py-1.5"
+          value={title}
+          onChange={(e) => {
+            setTitle(e.target.value)
+            setDirty(true)
+          }}
+          aria-label="Resume title"
+        />
+        <span className="chip">{resume.track}</span>
+        {dirty && <span className="text-xs text-[var(--color-warn)]">Unsaved</span>}
+        {engine && <span className="chip">{engine}</span>}
       </div>
 
-      {status && (
-        <p className="text-sm text-[var(--color-soft)]" role="status">
-          {status}
-        </p>
-      )}
-
-      {/* Main workspace + optional PDF preview rail */}
-      <div className={`grid gap-5 ${showPreview ? 'xl:grid-cols-12' : ''}`}>
-        <div className={`space-y-5 ${showPreview ? 'xl:col-span-7' : ''}`}>
-          <div className="grid gap-5 lg:grid-cols-12">
-            <section className="card flex flex-col p-4 lg:col-span-7">
-              <div className="mb-3 flex items-center justify-between">
-                <h2 className="font-display text-sm font-semibold tracking-wide">
-                  {resume.track === 'latex' ? 'LaTeX editor' : 'Structured form'}
-                </h2>
-              </div>
-              {resume.track === 'latex' ? (
-                <textarea
-                  className="input min-h-[28rem] flex-1 resize-y font-mono text-[13px] leading-relaxed"
-                  value={latex}
-                  onChange={(e) => {
-                    setLatex(e.target.value)
-                    setDirty(true)
-                  }}
-                  spellCheck={false}
-                />
-              ) : (
-                <StructuredForm
-                  value={structured}
-                  onChange={(v) => {
-                    setStructured(v)
-                    setDirty(true)
-                  }}
-                />
-              )}
-            </section>
-
-            <div className="flex flex-col gap-5 lg:col-span-5">
-              <section className="card p-4">
-                <div className="flex items-center justify-between gap-2">
-                  <h2 className="font-display text-sm font-semibold tracking-wide">ATS score</h2>
-                  {overall != null && job?.status === 'complete' && (
-                    <button type="button" className="btn btn-secondary text-xs py-1" onClick={copyScore}>
-                      Copy
-                    </button>
-                  )}
-                </div>
-                {job ? (
-                  <div className="mt-3 space-y-4">
-                    <ProgressStepper status={job.status} />
-                    {job.status === 'processing' || job.status === 'queued' ? (
-                      <div className="rounded-lg border border-[var(--color-line)] bg-[var(--color-panel-2)] px-4 py-6 text-center">
-                        <p className="font-display text-3xl font-semibold text-[var(--color-muted)]">…</p>
-                        <p className="mt-1 text-sm text-[var(--color-soft)]">Scoring in progress</p>
-                      </div>
-                    ) : job.result_json ? (
-                      <>
-                        <div className="flex items-end gap-2">
-                          <span className="font-display text-5xl font-semibold tabular-nums text-[var(--color-accent)]">
-                            {overall ?? '—'}
-                          </span>
-                          <span className="mb-2 text-sm text-[var(--color-muted)]">/100</span>
-                        </div>
-                        <ul className="space-y-2">
-                          {cats.map((c) => (
-                            <li
-                              key={c.name}
-                              className="rounded-lg border border-[var(--color-line)] bg-[var(--color-panel-2)] p-3"
-                            >
-                              <div className="flex items-center justify-between gap-2 text-sm">
-                                <span className="font-medium">{c.name}</span>
-                                <span className="tabular-nums text-[var(--color-soft)]">{c.score}</span>
-                              </div>
-                              <div className="mt-2 h-1 overflow-hidden rounded-full bg-[var(--color-line)]">
-                                <div
-                                  className="h-full rounded-full bg-[var(--color-accent)]"
-                                  style={{ width: `${Math.min(100, Math.max(0, c.score))}%` }}
-                                />
-                              </div>
-                              {c.evidence && (
-                                <p className="mt-2 text-xs leading-relaxed text-[var(--color-muted)]">
-                                  {c.evidence}
-                                </p>
-                              )}
-                            </li>
-                          ))}
-                        </ul>
-                      </>
-                    ) : null}
-                    {job.error && <p className="text-sm text-[var(--color-danger)]">{job.error}</p>}
-                  </div>
-                ) : (
-                  <p className="mt-3 text-sm text-[var(--color-muted)]">
-                    Run <strong>Re-check score</strong> for async results with evidence.
-                  </p>
-                )}
-              </section>
-
-              <section className="card p-4">
-                <h2 className="font-display text-sm font-semibold tracking-wide">JD-aware coach</h2>
-                <p className="mt-1 text-xs text-[var(--color-muted)]">
-                  Fixed actions only — free-form chat is disabled to reduce prompt injection risk.
-                </p>
-                <div className="mt-3 space-y-3">
-                  <div>
-                    <label className="label" htmlFor="jd">
-                      Job description (optional, max 4k)
-                    </label>
-                    <textarea
-                      id="jd"
-                      className="input h-24 resize-y text-sm"
-                      placeholder="Paste JD for align-to-JD action"
-                      maxLength={4000}
-                      value={jd}
-                      onChange={(e) => setJd(e.target.value)}
-                    />
-                    <p className="mt-1 text-xs text-[var(--color-muted)]">{jd.length}/4000</p>
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    {COACH_ACTIONS.map((a) => (
-                      <button
-                        key={a.id}
-                        type="button"
-                        className="btn btn-primary text-xs"
-                        disabled={coaching}
-                        onClick={() => void runCoach(a.id)}
-                      >
-                        {a.label}
-                      </button>
-                    ))}
-                  </div>
-                  {chatReply && (
-                    <p className="rounded-lg border border-[var(--color-line)] bg-[var(--color-panel-2)] p-3 text-sm leading-relaxed">
-                      {chatReply}
-                    </p>
-                  )}
-                  {proposed && (
-                    <div className="rounded-xl border border-amber-500/50 bg-amber-500/5 p-3">
-                      <p className="text-sm font-medium text-amber-700">
-                        Proposed edit · <span className="font-mono text-xs">{proposed.section}</span>
-                      </p>
-                      <pre className="mt-2 max-h-36 overflow-auto whitespace-pre-wrap font-mono text-xs leading-relaxed text-[var(--color-soft)]">
-                        {proposed.after}
-                      </pre>
-                      <div className="mt-3 flex flex-wrap gap-2">
-                        <button type="button" onClick={() => void applyEdit()} className="btn btn-warn">
-                          Approve & apply
-                        </button>
-                        <button type="button" className="btn btn-secondary" onClick={() => setProposed(null)}>
-                          Dismiss
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </section>
-            </div>
+      {/* 1/5 options | 2/5 editor | 2/5 preview */}
+      <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 xl:grid-cols-5">
+        {/* OPTIONS 1/5 */}
+        <aside className="card flex min-h-0 flex-col overflow-y-auto p-3 xl:col-span-1">
+          <p className="section-title">Actions</p>
+          <div className="flex flex-col gap-2">
+            <button type="button" onClick={() => void save()} className="btn btn-secondary w-full">
+              Save
+            </button>
+            <button
+              type="button"
+              onClick={() => void compileAndPreview()}
+              className="btn btn-primary w-full"
+              disabled={previewBusy}
+            >
+              {previewBusy ? 'Compiling…' : 'Compile'}
+            </button>
+            <button type="button" onClick={() => void downloadPdf()} className="btn btn-secondary w-full">
+              Download PDF
+            </button>
+            <button
+              type="button"
+              onClick={() => void score()}
+              className="btn btn-secondary w-full"
+              disabled={scoring}
+            >
+              {scoring ? 'Scoring…' : 'Re-check score'}
+            </button>
+            <button type="button" onClick={() => void remove()} className="btn btn-danger w-full">
+              Delete
+            </button>
           </div>
-        </div>
 
-        {showPreview && (
-          <aside className="card flex flex-col overflow-hidden xl:col-span-5 xl:sticky xl:top-20 xl:max-h-[calc(100vh-6rem)]">
-            <div className="flex items-center justify-between border-b border-[var(--color-line)] px-4 py-3">
-              <div>
-                <h2 className="font-display text-sm font-semibold">PDF preview</h2>
-                <p className="text-xs text-[var(--color-muted)]">
-                  Live · letter · 0.75″ margins
-                  {previewBusy ? ' · updating…' : ''}
-                </p>
-              </div>
-              <button
-                type="button"
-                className="btn btn-secondary text-xs py-1"
-                onClick={() => {
-                  setShowPreview(false)
-                  revokePreview()
-                }}
-              >
-                Close
-              </button>
-            </div>
-            <div className="min-h-[28rem] flex-1 bg-[var(--color-panel-2)] p-3">
-              {previewUrl ? (
-                <iframe
-                  title="Resume PDF preview"
-                  src={previewUrl}
-                  className="h-full min-h-[28rem] w-full rounded-lg border border-[var(--color-line)] bg-white"
-                />
-              ) : (
-                <div className="flex h-full min-h-[28rem] items-center justify-center text-sm text-[var(--color-muted)]">
-                  {previewBusy ? 'Rendering…' : 'No preview yet'}
-                </div>
+          {status && (
+            <p className="mt-3 text-xs leading-relaxed text-[var(--color-soft)]" role="status">
+              {status}
+            </p>
+          )}
+
+          <div className="mt-4 border-t border-[var(--color-line)] pt-3">
+            <div className="mb-2 flex items-center justify-between">
+              <h2 className="font-display text-xs font-semibold tracking-wide">ATS score</h2>
+              {overall != null && job?.status === 'complete' && (
+                <button type="button" className="btn btn-secondary text-xs py-0.5 px-1.5" onClick={copyScore}>
+                  Copy
+                </button>
               )}
             </div>
-          </aside>
-        )}
+            {job ? (
+              <div className="space-y-2">
+                <ProgressStepper status={job.status} />
+                {job.result_json && (
+                  <>
+                    <p className="font-display text-3xl font-semibold tabular-nums text-[var(--color-accent)]">
+                      {overall ?? '—'}
+                      <span className="text-sm text-[var(--color-muted)]">/100</span>
+                    </p>
+                    <ul className="max-h-40 space-y-1.5 overflow-y-auto text-xs">
+                      {cats.map((c) => (
+                        <li key={c.name} className="rounded border border-[var(--color-line)] bg-[var(--color-panel-2)] p-1.5">
+                          <div className="flex justify-between gap-1">
+                            <span className="truncate">{c.name}</span>
+                            <span className="tabular-nums">{c.score}</span>
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                  </>
+                )}
+                {job.error && <p className="text-xs text-[var(--color-danger)]">{job.error}</p>}
+              </div>
+            ) : (
+              <p className="text-xs text-[var(--color-muted)]">Score to see categories.</p>
+            )}
+          </div>
+
+          <div className="mt-4 border-t border-[var(--color-line)] pt-3">
+            <h2 className="font-display text-xs font-semibold tracking-wide">Coach</h2>
+            <p className="mt-1 text-[10px] text-[var(--color-muted)]">Fixed actions only</p>
+            <textarea
+              id="jd"
+              className="input mt-2 h-16 resize-y text-xs"
+              placeholder="JD (optional)"
+              maxLength={4000}
+              value={jd}
+              onChange={(e) => setJd(e.target.value)}
+            />
+            <div className="mt-2 flex flex-col gap-1.5">
+              {COACH_ACTIONS.map((a) => (
+                <button
+                  key={a.id}
+                  type="button"
+                  className="btn btn-primary w-full text-xs py-1.5"
+                  disabled={coaching}
+                  onClick={() => void runCoach(a.id)}
+                >
+                  {a.label}
+                </button>
+              ))}
+            </div>
+            {chatReply && (
+              <p className="mt-2 max-h-24 overflow-y-auto rounded border border-[var(--color-line)] bg-[var(--color-panel-2)] p-2 text-xs leading-relaxed">
+                {chatReply}
+              </p>
+            )}
+            {proposed && (
+              <div className="mt-2 rounded border border-amber-500/50 bg-amber-500/5 p-2">
+                <p className="text-xs font-medium text-amber-700">Edit · {proposed.section}</p>
+                <pre className="mt-1 max-h-20 overflow-auto whitespace-pre-wrap font-mono text-[10px] text-[var(--color-soft)]">
+                  {proposed.after}
+                </pre>
+                <div className="mt-2 flex gap-1">
+                  <button type="button" onClick={() => void applyEdit()} className="btn btn-warn text-xs py-1">
+                    Apply
+                  </button>
+                  <button type="button" className="btn btn-secondary text-xs py-1" onClick={() => setProposed(null)}>
+                    Dismiss
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </aside>
+
+        {/* EDITOR 2/5 */}
+        <section className="card flex min-h-0 flex-col overflow-hidden p-3 xl:col-span-2">
+          <h2 className="section-title shrink-0">
+            {resume.track === 'latex' ? 'LaTeX editor' : 'Structured form'}
+          </h2>
+          <div className="min-h-0 flex-1 overflow-auto">
+            {resume.track === 'latex' ? (
+              <textarea
+                className="input h-full min-h-[20rem] w-full resize-none font-mono text-[13px] leading-relaxed"
+                value={latex}
+                onChange={(e) => {
+                  setLatex(e.target.value)
+                  setDirty(true)
+                }}
+                spellCheck={false}
+              />
+            ) : (
+              <StructuredForm
+                value={structured}
+                onChange={(v) => {
+                  setStructured(v)
+                  setDirty(true)
+                }}
+              />
+            )}
+          </div>
+        </section>
+
+        {/* PREVIEW 2/5 */}
+        <section className="card flex min-h-0 flex-col overflow-hidden xl:col-span-2">
+          <div className="flex shrink-0 items-center justify-between border-b border-[var(--color-line)] px-3 py-2">
+            <div>
+              <h2 className="font-display text-sm font-semibold">PDF preview</h2>
+              <p className="text-[10px] text-[var(--color-muted)]">
+                {previewBusy ? 'Updating…' : engine === 'tectonic' ? 'Tectonic (real TeX)' : 'Live'}
+              </p>
+            </div>
+            <button
+              type="button"
+              className="btn btn-secondary text-xs py-1"
+              onClick={() => void compileAndPreview()}
+              disabled={previewBusy}
+            >
+              Refresh
+            </button>
+          </div>
+          <div className="min-h-0 flex-1 bg-[var(--color-panel-2)] p-2">
+            {previewUrl ? (
+              <iframe
+                title="Resume PDF preview"
+                src={previewUrl}
+                className="h-full w-full rounded border border-[var(--color-line)] bg-white"
+              />
+            ) : (
+              <div className="flex h-full min-h-[16rem] items-center justify-center text-sm text-[var(--color-muted)]">
+                {previewBusy ? 'Rendering…' : 'Click Compile — preview opens here (2/5)'}
+              </div>
+            )}
+          </div>
+        </section>
       </div>
     </div>
   )

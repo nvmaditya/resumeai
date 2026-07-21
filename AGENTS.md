@@ -7,7 +7,7 @@ Rules for coding agents working in this repository.
 - Local-first MVP, SaaS-shaped seams (`ObjectStore`, `JobRunner`, `ScoreEngine`, env config).
 - Ponytail: minimum code; no new deps if stdlib/existing stack covers it.
 - Trust boundaries: coach uses **fixed actions only** (no free-form user messages); sanitize JD/edits.
-- PDF: layout engine produces **valid** letter PDFs (margins/wrap). Full LaTeX = tectonic later.
+- PDF: prefer **tectonic** (`backend/bin/tectonic.exe` or `TECTONIC_PATH`); layout engine is fallback only.
 
 ## Git versioning & GitHub push (required)
 
@@ -41,12 +41,13 @@ Keep history **version-wise** so each meaningful slice is a tag + push.
 |---------|---------|
 | v0.1.0 | Scaffold + hiring-agent vendor + auth/resumes/score stubs |
 | v0.2.0 | Light UI, structured form, safe coach, PDF layout + live preview |
+| v0.3.0 | 1/5–2/5–2/5 workspace + tectonic Overleaf-parity compile |
 
 ### Repo
 
 - Remote: https://github.com/nvmaditya/resumeai
 - Default branch: `main`
-- Tags: `v0.1.0` (scaffold), `v0.2.0` (PDF layout + live preview)
+- Tags: `v0.1.0`, `v0.2.0`, `v0.3.0` (tectonic + 1/5 layout)
 - Do **not** commit secrets, `.env`, `data/`, personal `resume/` samples, or `.venv/`.
 
 ## Dev commands
@@ -66,7 +67,8 @@ npm run dev
 
 | Path | Role |
 |------|------|
-| `backend/app/compile/` | PDF layout / future tectonic |
+| `backend/app/compile/` | tectonic primary, layout fallback |
+| `backend/bin/tectonic.exe` | Local TeX engine (gitignored binary) |
 | `backend/app/scoring/` | stub or hiring-agent |
 | `backend/app/chat/` | coach + injection safety |
 | `backend/app/storage/` | LocalObjectStore → S3 later |

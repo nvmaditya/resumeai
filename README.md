@@ -39,6 +39,20 @@ npm run dev
 
 Open `http://localhost:5173` — register → create resume → score → chat → apply edit → re-score.
 
+Workspace (desktop): **1/5** actions · **2/5** editor · **2/5** PDF preview.
+
+## Tectonic (Overleaf-like PDFs)
+
+Drop the binary at:
+
+```
+backend/bin/tectonic.exe
+```
+
+Or set `TECTONIC_PATH` to any path. Without it, a simple layout fallback is used (fonts/margins will **not** match Overleaf).
+
+Download: https://github.com/tectonic-typesetting/tectonic/releases
+
 ## hiring-agent
 
 Vendored at `backend/vendor/hiring-agent` (MIT, interviewstreet).

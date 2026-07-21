@@ -180,6 +180,7 @@ def compile_resume(
         result = {
             **{k: v for k, v in result.items() if k != "pdf_bytes"},
             "pdf_key": pdf_key,
+            "engine": result.get("engine", "layout"),
             "download_path": f"/api/v1/resumes/{resume.id}/pdf",
             "preview_path": f"/api/v1/resumes/{resume.id}/pdf?inline=1",
         }

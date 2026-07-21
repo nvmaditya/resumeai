@@ -15,6 +15,8 @@ class Settings(BaseSettings):
     data_dir: str = "./data"
     score_backend: str = "stub"  # stub | hiring_agent
     hiring_agent_path: str = str(Path(__file__).resolve().parents[1] / "vendor" / "hiring-agent")
+    # Optional absolute path to tectonic.exe; else backend/bin/tectonic.exe then PATH
+    tectonic_path: str = ""
 
     @property
     def cors_origin_list(self) -> list[str]:

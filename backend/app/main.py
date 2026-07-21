@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.auth.router import router as auth_router
 from app.chat.stub import StubCoach
-from app.compile.stub import StubLatexCompiler
+from app.compile.tectonic import build_compiler, resolve_tectonic
 from app.config import get_settings
 from app.db import init_db
 from app.extract.stub import StubExtractor
@@ -29,7 +29,8 @@ async def lifespan(app: FastAPI):
     app.state.store = LocalObjectStore(settings.data_dir)
     app.state.job_runner = LocalJobRunner()
     app.state.score_engine = build_score_engine(settings)
-    app.state.compiler = StubLatexCompiler()
+    app.state.compiler = build_compiler(settings.tectonic_path or None)
+    app.state.latex_engine = "tectonic" if resolve_tectonic(settings.tectonic_path or None) else "layout"
     app.state.extractor = StubExtractor()
     app.state.coach = StubCoach()
     app.state.github = StubGitHubClient()
@@ -38,7 +39,7 @@ async def lifespan(app: FastAPI):
 
 def create_app() -> FastAPI:
     settings = get_settings()
-    app = FastAPI(title="ResumeAI", version="0.1.0", lifespan=lifespan)
+    app = FastAPI(title="ResumeAI", version="0.3.0", lifespan=lifespan)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origin_list,
@@ -53,7 +54,13 @@ def create_app() -> FastAPI:
 
     @app.get(f"{api}/health")
     def health() -> dict:
-        return {"status": "ok", "env": settings.app_env, "score_backend": settings.score_backend}
+        eng = "tectonic" if resolve_tectonic(settings.tectonic_path or None) else "layout"
+        return {
+            "status": "ok",
+            "env": settings.app_env,
+            "score_backend": settings.score_backend,
+            "latex_engine": eng,
+        }
 
     return app
 
