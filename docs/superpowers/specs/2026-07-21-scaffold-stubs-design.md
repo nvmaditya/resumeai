@@ -1,6 +1,6 @@
 # Design: SaaS-Ready Scaffold + Stubs (MVP Shell)
 
-**Status**: Revised for SaaS continuity (pending re-approval)  
+**Status**: Approved + implemented (scaffold slice, 2026-07-21)  
 **PRD**: `PRD.md` v1.1  
 **Slice**: Full scaffold with stub implementations — local defaults, **SaaS-shaped boundaries** so cloud migration is config + new adapters, not a rewrite.
 

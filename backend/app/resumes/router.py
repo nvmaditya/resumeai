@@ -1,0 +1,320 @@
+from datetime import datetime, timezone
+from typing import Any
+
+from fastapi import APIRouter, Depends, HTTPException, Request, status
+from sqlmodel import Session, select
+
+from app.db import get_session
+from app.deps import get_current_user, get_store
+from app.models import Resume, ScoreJob, User
+from app.schemas import (
+    ApplyEditRequest,
+    ChatRequest,
+    ChatResponse,
+    JobOut,
+    ResumeCreate,
+    ResumeOut,
+    ResumeUpdate,
+)
+from app.storage.protocol import ObjectStore
+
+router = APIRouter(prefix="/resumes", tags=["resumes"])
+
+
+def _latex_key(user_id: str, resume_id: str) -> str:
+    return f"users/{user_id}/resumes/{resume_id}/main.tex"
+
+
+def _load_owned(session: Session, user: User, resume_id: str) -> Resume:
+    resume = session.exec(
+        select(Resume).where(Resume.id == resume_id, Resume.user_id == user.id)
+    ).first()
+    if not resume:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Resume not found")
+    return resume
+
+
+def _to_out(resume: Resume, store: ObjectStore) -> ResumeOut:
+    body = None
+    if resume.latex_key and store.exists(resume.latex_key):
+        body = store.get(resume.latex_key).decode("utf-8", errors="replace")
+    return ResumeOut(
+        id=resume.id,
+        title=resume.title,
+        track=resume.track,
+        latex_key=resume.latex_key,
+        latex_body=body,
+        structured_json=resume.structured_json,
+        template_id=resume.template_id,
+        created_at=resume.created_at,
+        updated_at=resume.updated_at,
+    )
+
+
+def _empty_structured() -> dict[str, Any]:
+    return {
+        "basics": {"name": "", "email": "", "summary": ""},
+        "work": [],
+        "education": [],
+        "skills": [],
+        "projects": [],
+    }
+
+
+@router.get("", response_model=list[ResumeOut])
+def list_resumes(
+    user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+    store: ObjectStore = Depends(get_store),
+) -> list[ResumeOut]:
+    rows = session.exec(select(Resume).where(Resume.user_id == user.id)).all()
+    return [_to_out(r, store) for r in rows]
+
+
+@router.post("", response_model=ResumeOut, status_code=status.HTTP_201_CREATED)
+def create_resume(
+    body: ResumeCreate,
+    user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+    store: ObjectStore = Depends(get_store),
+) -> ResumeOut:
+    structured = None
+    if body.track == "structured":
+        structured = body.structured_json or _empty_structured()
+    resume = Resume(
+        user_id=user.id,
+        title=body.title,
+        track=body.track,
+        structured_json=structured,
+        template_id=body.template_id,
+    )
+    session.add(resume)
+    session.commit()
+    session.refresh(resume)
+
+    if body.track == "latex":
+        key = _latex_key(user.id, resume.id)
+        store.put(key, (body.latex_body or "% Resume\n").encode("utf-8"))
+        resume.latex_key = key
+        resume.updated_at = datetime.now(timezone.utc)
+        session.add(resume)
+        session.commit()
+        session.refresh(resume)
+
+    return _to_out(resume, store)
+
+
+@router.get("/{resume_id}", response_model=ResumeOut)
+def get_resume(
+    resume_id: str,
+    user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+    store: ObjectStore = Depends(get_store),
+) -> ResumeOut:
+    return _to_out(_load_owned(session, user, resume_id), store)
+
+
+@router.patch("/{resume_id}", response_model=ResumeOut)
+def update_resume(
+    resume_id: str,
+    body: ResumeUpdate,
+    user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+    store: ObjectStore = Depends(get_store),
+) -> ResumeOut:
+    resume = _load_owned(session, user, resume_id)
+    if body.title is not None:
+        resume.title = body.title
+    if body.template_id is not None:
+        resume.template_id = body.template_id
+    if body.structured_json is not None:
+        resume.structured_json = body.structured_json
+    if body.latex_body is not None:
+        key = resume.latex_key or _latex_key(user.id, resume.id)
+        store.put(key, body.latex_body.encode("utf-8"))
+        resume.latex_key = key
+    resume.updated_at = datetime.now(timezone.utc)
+    session.add(resume)
+    session.commit()
+    session.refresh(resume)
+    return _to_out(resume, store)
+
+
+@router.delete("/{resume_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_resume(
+    resume_id: str,
+    user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+    store: ObjectStore = Depends(get_store),
+) -> None:
+    resume = _load_owned(session, user, resume_id)
+    if resume.latex_key and store.exists(resume.latex_key):
+        store.delete(resume.latex_key)
+    session.delete(resume)
+    session.commit()
+
+
+@router.post("/{resume_id}/compile")
+def compile_resume(
+    resume_id: str,
+    request: Request,
+    user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+    store: ObjectStore = Depends(get_store),
+) -> dict:
+    resume = _load_owned(session, user, resume_id)
+    compiler = request.app.state.compiler
+    tex = b""
+    if resume.latex_key and store.exists(resume.latex_key):
+        tex = store.get(resume.latex_key)
+    elif resume.structured_json:
+        # ponytail: minimal tex from structured; real templates later
+        name = (resume.structured_json.get("basics") or {}).get("name") or "Candidate"
+        tex = f"\\documentclass{{article}}\\begin{{document}}{name}\\end{{document}}".encode()
+    result = compiler.compile(tex)
+    pdf_key = f"users/{user.id}/resumes/{resume.id}/out.pdf"
+    if result.get("pdf_bytes"):
+        store.put(pdf_key, result["pdf_bytes"])
+        result = {**result, "pdf_key": pdf_key}
+        result.pop("pdf_bytes", None)
+    return result
+
+
+@router.post("/{resume_id}/extract")
+def extract_resume(
+    resume_id: str,
+    request: Request,
+    user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+) -> dict:
+    resume = _load_owned(session, user, resume_id)
+    extractor = request.app.state.extractor
+    data = extractor.extract(b"", "application/pdf")
+    resume.structured_json = data
+    resume.track = "structured"
+    resume.updated_at = datetime.now(timezone.utc)
+    session.add(resume)
+    session.commit()
+    return data
+
+
+@router.post("/{resume_id}/score", response_model=JobOut)
+def score_resume(
+    resume_id: str,
+    request: Request,
+    user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+    store: ObjectStore = Depends(get_store),
+) -> JobOut:
+    resume = _load_owned(session, user, resume_id)
+    job = ScoreJob(resume_id=resume.id, user_id=user.id, status="queued")
+    session.add(job)
+    session.commit()
+    session.refresh(job)
+
+    snapshot = {
+        "resume_id": resume.id,
+        "track": resume.track,
+        "structured_json": resume.structured_json,
+        "latex_body": None,
+    }
+    if resume.latex_key and store.exists(resume.latex_key):
+        snapshot["latex_body"] = store.get(resume.latex_key).decode("utf-8", errors="replace")
+
+    runner = request.app.state.job_runner
+    engine = request.app.state.score_engine
+
+    def _run() -> None:
+        from sqlmodel import Session as S
+
+        from app.db import engine as db_engine
+
+        with S(db_engine) as s:
+            row = s.get(ScoreJob, job.id)
+            if not row:
+                return
+            row.status = "processing"
+            row.updated_at = datetime.now(timezone.utc)
+            s.add(row)
+            s.commit()
+            try:
+                result = engine.run(snapshot, job_id=job.id)
+                row.status = "complete"
+                row.result_json = result
+                row.error = None
+            except Exception as exc:  # ponytail: surface failure on job row
+                row.status = "failed"
+                row.error = str(exc)
+            row.updated_at = datetime.now(timezone.utc)
+            s.add(row)
+            s.commit()
+
+    runner.enqueue(job.id, _run)
+    return JobOut(
+        id=job.id,
+        resume_id=job.resume_id,
+        status=job.status,
+        result_json=job.result_json,
+        error=job.error,
+        created_at=job.created_at,
+        updated_at=job.updated_at,
+    )
+
+
+@router.post("/{resume_id}/chat", response_model=ChatResponse)
+def chat_resume(
+    resume_id: str,
+    body: ChatRequest,
+    request: Request,
+    user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+    store: ObjectStore = Depends(get_store),
+) -> ChatResponse:
+    resume = _load_owned(session, user, resume_id)
+    completed = session.exec(
+        select(ScoreJob).where(
+            ScoreJob.resume_id == resume.id,
+            ScoreJob.user_id == user.id,
+            ScoreJob.status == "complete",
+        )
+    ).all()
+    latest = max(completed, key=lambda j: j.created_at) if completed else None
+    latex = None
+    if resume.latex_key and store.exists(resume.latex_key):
+        latex = store.get(resume.latex_key).decode("utf-8", errors="replace")
+    coach = request.app.state.coach
+    return coach.advise(
+        resume_content=latex or str(resume.structured_json or {}),
+        score_json=latest.result_json if latest else None,
+        job_description=body.job_description,
+        message=body.message,
+    )
+
+
+@router.post("/{resume_id}/apply-edit", response_model=ResumeOut)
+def apply_edit(
+    resume_id: str,
+    body: ApplyEditRequest,
+    user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+    store: ObjectStore = Depends(get_store),
+) -> ResumeOut:
+    resume = _load_owned(session, user, resume_id)
+    if body.section == "latex" or resume.track == "latex":
+        key = resume.latex_key or _latex_key(user.id, resume.id)
+        store.put(key, body.after.encode("utf-8"))
+        resume.latex_key = key
+    else:
+        data = dict(resume.structured_json or _empty_structured())
+        # ponytail: dotted path set only for simple keys; nested later if needed
+        parts = body.section.split(".")
+        if len(parts) == 1:
+            data[parts[0]] = body.after
+        else:
+            data[parts[0]] = body.after
+        resume.structured_json = data
+    resume.updated_at = datetime.now(timezone.utc)
+    session.add(resume)
+    session.commit()
+    session.refresh(resume)
+    return _to_out(resume, store)
