@@ -44,8 +44,9 @@ Keep history **version-wise** so each meaningful slice is a tag + push.
 
 ### Repo
 
-- Remote: set after `create_repository` / first push.
-- Default branch: `main`.
+- Remote: https://github.com/nvmaditya/resumeai
+- Default branch: `main`
+- Tags: `v0.1.0` (scaffold), `v0.2.0` (PDF layout + live preview)
 - Do **not** commit secrets, `.env`, `data/`, personal `resume/` samples, or `.venv/`.
 
 ## Dev commands
