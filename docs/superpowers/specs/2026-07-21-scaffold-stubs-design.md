@@ -1,178 +1,267 @@
-# Design: Full Scaffold + Stubs (MVP Shell)
+# Design: SaaS-Ready Scaffold + Stubs (MVP Shell)
 
-**Status**: Approved (conversation 2026-07-21)  
+**Status**: Revised for SaaS continuity (pending re-approval)  
 **PRD**: `PRD.md` v1.1  
-**Slice**: Full scaffold with stub implementations for every module — no real tectonic / Ollama / hiring-agent / GitHub OAuth yet.
+**Slice**: Full scaffold with stub implementations — local defaults, **SaaS-shaped boundaries** so cloud migration is config + new adapters, not a rewrite.
 
 ---
 
 ## 1. Goal
 
-Ship a runnable local monorepo where a user can:
+Ship a runnable product shell that is **the same codebase** you will host as SaaS later.
+
+Local now:
 
 1. Register / log in (email + password + JWT)
-2. Create multiple resumes (LaTeX or structured track)
-3. Hit compile / extract / score / chat / apply-edit endpoints that return stub results
-4. Use a React shell covering auth, resume list, dual editor placeholders, score progress stepper, and chat propose→diff→approve UI
+2. Multi-resume CRUD (LaTeX + structured tracks)
+3. Compile / extract / score / chat / apply-edit via **stub adapters**
+4. React shell for the full loop
 
-Success criterion for this slice: full loop with stubs, zero external paid services.
+Later (without rewriting routes, models, or UI flows):
+
+- SQLite → Postgres
+- Local disk → object storage (S3/R2/etc.)
+- In-process jobs → Redis/Celery/RQ/cloud queue
+- Stub scoring → hiring-agent service
+- Stub coach → Ollama or hosted LLM API
+- Single machine → containerized API + static frontend + managed DB
+
+**Success for this slice:** full stub loop locally **and** every infra concern goes through a narrow interface or env setting.
 
 ---
 
-## 2. Architecture
+## 2. Architecture Principle: Local-backed, SaaS-shaped
 
-Single repo, two apps, domain modules as replaceable packages (folder + protocol + stub):
+```
+┌─────────────┐     HTTPS/JSON      ┌──────────────────────────────┐
+│  Frontend   │ ──────────────────► │  Stateless FastAPI           │
+│  (static)   │                     │  thin routers only           │
+└─────────────┘                     │         │                    │
+                                    │    domain services           │
+                                    │         │                    │
+                                    │  ┌──────┴───────┐            │
+                                    │  │  Protocols   │            │
+                                    │  └──────┬───────┘            │
+                                    │    adapters (swap)           │
+                                    │  storage | jobs | score | …  │
+                                    └──────────────────────────────┘
+```
+
+| Keep forever (product core) | Swap later (adapters only) |
+|----------------------------|----------------------------|
+| API routes & JSON contracts | `ObjectStore` impl |
+| SQLModel entities & services | `DATABASE_URL` backend |
+| Auth rules (JWT, password) | Secret store / token TTL |
+| Score/chat/compile **protocols** | Real engines |
+| Multi-user ownership checks | Deploy topology |
+
+**Repo layout (still monorepo, not microservices):**
 
 ```
 resumeai/
   backend/
     app/
-      main.py
-      config.py
-      db.py
-      models/
+      main.py                 # app factory, CORS, router mount, DI wiring
+      config.py               # all settings from env (12-factor)
+      db.py                   # engine from DATABASE_URL
+      deps.py                 # FastAPI Depends → get_current_user, get_store, …
+      models/                 # SQLModel tables
+      schemas/                # Pydantic request/response DTOs (API contract)
       auth/
       resumes/
-      compile/
+      compile/                # protocol + stub (+ later tectonic)
       extract/
       scoring/
       chat/
       github/
-      jobs/
-      storage/
+      jobs/                   # JobRunner protocol + local impl
+      storage/                # ObjectStore protocol + local impl
     tests/
     requirements.txt
   frontend/
     src/
       pages/
-      api/
+      api/                    # base URL from VITE_API_URL only
       components/
     package.json
-  data/                 # gitignored runtime
+  data/                       # local ObjectStore root (gitignored); not used in SaaS
   docs/
   PRD.md
   README.md
+  .env.example                # documents every setting; no secrets committed
 ```
 
-**Approach chosen:** backend/ + frontend/ monorepo (not uv workspaces, not backend-only). Modular via Python protocols and thin routers; swap stubs later without rewriting routes.
+Still **not** uv workspaces / microservices. SaaS readiness comes from **boundaries**, not from splitting repos. When you deploy: build frontend to static assets, run API as one or more workers, point env at managed services.
 
 ---
 
-## 3. Locked Tech Stack (from PRD)
+## 3. Tech Stack (now vs later)
 
-| Layer | Choice |
-|-------|--------|
-| Backend | FastAPI + Python |
-| Frontend | React + Vite + TypeScript + Tailwind |
-| DB | SQLite + SQLModel |
-| Auth | Email + password + JWT |
-| LLM | Ollama (stubbed this slice) |
-| Files | Local filesystem under `data/` |
-| Jobs | FastAPI BackgroundTasks + in-memory store |
-| LaTeX | tectonic (stubbed this slice) |
+| Layer | MVP (now) | SaaS later (no product rewrite) |
+|-------|-----------|----------------------------------|
+| Backend | FastAPI + Python | Same |
+| Frontend | React + Vite + TS + Tailwind | Same build → CDN/static host |
+| DB | SQLite via `DATABASE_URL` | Postgres via same `DATABASE_URL` |
+| Auth | Email + password + JWT | Same; optional OAuth adapters later |
+| LLM | Coach stub | Ollama or cloud API behind `Coach` |
+| Files | `LocalObjectStore` under `data/` | `S3ObjectStore` (or R2, GCS) |
+| Jobs | `LocalJobRunner` (BackgroundTasks + DB row) | Redis queue runner, same `JobRunner` API |
+| LaTeX | Compile stub | Containerized tectonic worker behind `LatexCompiler` |
+| Config | `.env` / process env | Platform secrets / env |
 
-**Constraints:** Modules independently replaceable. Ponytail: minimum code, no speculative abstractions beyond one protocol per replaceable domain.
+**Hard rules for this scaffold:**
+
+1. **No raw filesystem paths in business logic** — only `ObjectStore` keys (e.g. `users/{user_id}/resumes/{resume_id}/main.tex`).
+2. **No engine URL hardcoded** — `DATABASE_URL`, `JWT_SECRET`, `CORS_ORIGINS`, `DATA_DIR`, etc. only via `config.py`.
+3. **No in-memory-only job state as source of truth** — job status lives in DB (`ScoreJob`); runner is replaceable.
+4. **Every query is tenant-scoped** — `user_id` from JWT; never trust client-supplied owner ids.
+5. **API is stateless** — any instance can serve any request (sessions not in process memory).
+6. **Frontend talks only to configured API origin** — `VITE_API_URL`; no hardcoded `localhost` in source (dev default in `.env` only).
+
+Ponytail still applies: **one protocol per swap point**, one stub/local impl each. No factory frameworks, no plugin systems, no multi-cloud abstractions.
 
 ---
 
-## 4. Data Model
+## 4. Data Model (SaaS-safe from day one)
 
 ### User
 - `id: str` (UUID)
-- `email: str` (unique)
+- `email: str` (unique, indexed)
 - `password_hash: str`
 - `created_at: datetime`
+- *(reserved later, not built now: `plan`, billing ids — add when monetization ships)*
 
 ### Resume
 - `id: str` (UUID)
-- `user_id: str` (FK)
+- `user_id: str` (FK, indexed) — **ownership**
 - `title: str`
 - `track: "latex" | "structured"`
-- `latex_path: str | null` — path under `data/` for Track A
-- `structured_json: dict | null` — JSON-Resume-shaped for Track B
-- `template_id: str | null` — template key for structured track
+- `latex_key: str | null` — **object key**, not absolute path
+- `structured_json: dict | null` — JSON-Resume-shaped (fine in SQLite JSON / Postgres JSONB)
+- `template_id: str | null`
 - `created_at`, `updated_at: datetime`
 
 ### ScoreJob
 - `id: str` (UUID)
 - `resume_id: str` (FK)
-- `user_id: str` (FK)
+- `user_id: str` (FK, indexed) — for authz on `GET /jobs/{id}`
 - `status: "queued" | "processing" | "complete" | "failed"`
-- `result_json: dict | null` — PRD scoring output shape when complete
+- `result_json: dict | null`
 - `error: str | null`
 - `created_at`, `updated_at: datetime`
 
-No separate chat-message persistence in this slice (request/response only).
+### Conventions
+- UUID string PKs (portable, no serial surprises across DBs).
+- All timestamps UTC.
+- Soft multi-tenancy = row-level `user_id` (no org/team until product needs it).
+- No chat history table this slice (add later without breaking coach protocol).
 
 ---
 
-## 5. Module Contracts
+## 5. Config (12-factor)
 
-Each domain: **Protocol** + **Stub** + **router** (where HTTP is needed).
+All via environment / `.env.example`:
+
+| Variable | Purpose | Local default |
+|----------|---------|---------------|
+| `DATABASE_URL` | SQLAlchemy/SQLModel URL | `sqlite:///./data/app.db` |
+| `JWT_SECRET` | Sign tokens | dev-only default in example; **required** in prod |
+| `JWT_EXPIRE_MINUTES` | Access token TTL | `10080` (week) or shorter |
+| `CORS_ORIGINS` | Allowed frontend origins | `http://localhost:5173` |
+| `DATA_DIR` | Root for `LocalObjectStore` | `./data` |
+| `APP_ENV` | `local` \| `production` | `local` |
+| `VITE_API_URL` | Frontend API base (build-time) | `http://localhost:8000` |
+
+`config.py` is the only place that reads env. Adapters receive config via constructors in `main`/lifespan — not scattered `os.getenv`.
+
+---
+
+## 6. Module Contracts (protocols = SaaS seams)
+
+Each domain: **Protocol** + **local/stub impl** + **thin router** using `Depends`.
+
+### `ObjectStore` (storage/)
+```text
+put(key: str, data: bytes) -> None
+get(key: str) -> bytes
+delete(key: str) -> None
+exists(key: str) -> bool
+```
+- **Now:** `LocalObjectStore(DATA_DIR)` — keys map to files under `data/`.
+- **SaaS:** `S3ObjectStore(bucket, client)` — same keys.
+- DB stores **keys only**.
+
+### `JobRunner` (jobs/)
+```text
+enqueue(job_id: str, fn_name: str, payload: dict) -> None
+```
+- **Now:** FastAPI `BackgroundTasks` / `asyncio.create_task`; updates `ScoreJob` in DB.
+- **SaaS:** publish to Redis/SQS; worker process runs same handler functions.
+- Handlers are plain functions registered by name; status always written to DB so polling works across instances.
+
+### `ScoreEngine` (scoring/)
+- `run(snapshot: ScoreSnapshot) -> ScoreResult` matching PRD JSON shape.
+- Stub returns fixed sample; real hiring-agent later.
+- Router: create `ScoreJob` → enqueue → client polls `GET /jobs/{id}`.
+
+### `Coach` (chat/)
+- `advise(resume, score_json|None, jd|None, message) -> CoachReply`
+- Stub canned; later Ollama/OpenAI-compatible client. Product never imports an LLM SDK in routers.
+
+### `LatexCompiler` (compile/)
+- `compile(tex_bytes: bytes) -> CompileResult` (pdf bytes or error).
+- Stub placeholder PDF bytes; SaaS may run compiler in a worker container still behind this protocol.
+
+### `DocxPdfExtractor` (extract/)
+- `extract(file_bytes: bytes, content_type: str) -> dict`
+- Stub empty JSON-Resume skeleton.
+
+### `GitHubClient` (github/)
+- Stub empty enrichment; OAuth tokens later stay in auth/github adapter, not in scoring core.
 
 ### auth
-- Register, login, `GET /auth/me`
-- Passwords: stdlib-friendly hash (e.g. `hashlib.pbkdf2_hmac` or passlib if already chosen in deps — prefer one dependency only if needed; bcrypt via passlib is fine for trust boundary)
-- JWT: HS256, secret from env/`config`, short-lived access token
+- Register / login / me.
+- Password hash at trust boundary (e.g. PBKDF2 or bcrypt — pick one, document in plan).
+- JWT only; no server-side session store (SaaS multi-instance friendly).
+- Future OAuth = additional routes + link to same `User`, not a new app.
 
 ### resumes
-- Multi-resume CRUD scoped to current user
-- Create with track; optional initial latex body or structured_json
-- Patch updates title / latex content / structured fields / template_id
+- CRUD always filtered by `current_user.id`.
+- 404 on cross-user access (no existence leak required; consistent 404 is fine).
 
-### storage
-- Resolve `data/users/{user_id}/resumes/{resume_id}/...`
-- Read/write text and binary paths; create dirs on demand
-
-### compile (`LatexCompiler`)
-- `compile(source_tex: str | path, out_dir) -> CompileResult`
-- Stub: writes a placeholder PDF or returns message that tectonic is not wired
-
-### extract (`DocxPdfExtractor`)
-- `extract(path) -> dict` JSON-Resume-shaped
-- Stub: empty skeleton object with standard keys (basics, work, education, skills, projects)
-
-### scoring (`ScoreEngine`)
-- `start_score(resume_id, content snapshot) -> job_id`
-- Async: queued → processing → complete with fixed sample matching PRD minimum output shape
-- Re-score is always explicit `POST` (never auto after apply-edit)
-
-### chat (`Coach`)
-- Input: resume content + optional latest score JSON + JD + user message
-- Stub: canned advice referencing score categories + one `proposed_edit` payload
-- Apply path is separate endpoint (explicit user approval)
-
-### github (`GitHubClient`)
-- Stub: empty enrichment profile; scoring works without it
-
-### jobs
-- In-memory or SQLite-backed job rows (ScoreJob in DB preferred so status survives process inspect)
-- BackgroundTasks flips status and fills result_json
+### DI wiring (`deps.py` + app lifespan)
+```text
+app.state.store = LocalObjectStore(...)
+app.state.jobs = LocalJobRunner(...)
+app.state.score_engine = StubScoreEngine()
+...
+```
+SaaS deploy flips constructors from env (e.g. `STORAGE_BACKEND=s3`) — **one place**, not scattered.
 
 ---
 
-## 6. API Surface
+## 7. API Surface (stable product contract)
+
+Version-ready prefix: **`/api/v1`** (avoids painful renames when public SaaS ships).
 
 All resume/job routes require JWT.
 
 | Method | Path | Behavior |
 |--------|------|----------|
-| POST | `/auth/register` | create user |
-| POST | `/auth/login` | JWT |
-| GET | `/auth/me` | current user |
-| GET | `/resumes` | list mine |
-| POST | `/resumes` | create |
-| GET | `/resumes/{id}` | get |
-| PATCH | `/resumes/{id}` | update |
-| DELETE | `/resumes/{id}` | delete |
-| POST | `/resumes/{id}/compile` | stub compile |
-| POST | `/resumes/{id}/extract` | stub extract → may update structured_json |
-| POST | `/resumes/{id}/score` | enqueue score job |
-| GET | `/jobs/{job_id}` | job status + result |
-| POST | `/resumes/{id}/chat` | stub coach reply |
-| POST | `/resumes/{id}/apply-edit` | apply approved edit to latex or structured |
+| GET | `/api/v1/health` | liveness; no auth |
+| POST | `/api/v1/auth/register` | create user |
+| POST | `/api/v1/auth/login` | JWT |
+| GET | `/api/v1/auth/me` | current user |
+| GET/POST | `/api/v1/resumes` | list / create |
+| GET/PATCH/DELETE | `/api/v1/resumes/{id}` | owned only |
+| POST | `/api/v1/resumes/{id}/compile` | stub compile → store PDF key |
+| POST | `/api/v1/resumes/{id}/extract` | stub extract |
+| POST | `/api/v1/resumes/{id}/score` | enqueue job |
+| GET | `/api/v1/jobs/{job_id}` | status + result (owned) |
+| POST | `/api/v1/resumes/{id}/chat` | coach reply |
+| POST | `/api/v1/resumes/{id}/apply-edit` | explicit apply |
 
-### Score result shape (stub must match)
+### Score result shape (unchanged; PRD)
 
 ```json
 {
@@ -204,65 +293,101 @@ All resume/job routes require JWT.
 }
 ```
 
-### Chat request/response (minimal)
+### Chat / apply-edit
 
-**Request:** `{ "message": str, "job_description": str | null }`  
-**Response:** `{ "reply": str, "proposed_edit": { "section": str, "before": str, "after": str } | null }`
+**Chat request:** `{ "message": str, "job_description": str | null }`  
+**Chat response:** `{ "reply": str, "proposed_edit": { "section": str, "before": str, "after": str } | null }`  
+**Apply-edit:** `{ "section": str, "after": str }` — latex key `latex` replaces file bytes; else structured JSON path update.
 
-**Apply-edit request:** `{ "section": str, "after": str }` — updates stored resume content for that section (latex whole-file replace if section is `latex`, else structured path).
+Re-score is always manual (`POST .../score`), never auto after apply-edit.
 
 ---
 
-## 7. Frontend Shell
+## 8. Frontend Shell
 
 - Vite + React + TS + Tailwind
-- Pages: Login, Register, ResumeList, ResumeEditor (track-aware shell), Score, (chat panel can live on editor or score page)
-- `api/` thin fetch helpers with JWT from localStorage
-- Components: App layout, auth guard, ProgressStepper (queued/processing/complete/failed)
-- Editors: LaTeX = textarea; Structured = simple field list over JSON keys — not production-quality forms
+- `VITE_API_URL` for all fetches; Authorization bearer from memory/localStorage
+- Pages: Login, Register, ResumeList, ResumeEditor, Score (+ chat panel)
+- ProgressStepper polls job endpoint (works with multi-instance API later)
+- Editors: LaTeX textarea; structured simple fields
+- CORS: backend allows configured origins only (local dev + future SaaS domain)
 
-No real PDF viewer required; show compile stub message / download link if stub writes a file.
-
----
-
-## 8. Explicit Non-Goals (this slice)
-
-- Real tectonic / latexmk
-- Real Ollama calls
-- Real hiring-agent integration
-- GitHub OAuth or scraping
-- Real PDF/DOCX parsing
-- Real LaTeX template catalog
-- Subscriptions / multi-resume limits enforcement beyond “multi-resume works”
-- Cloud hosting design
+No assumption that frontend and API share a process or host.
 
 ---
 
-## 9. Testing (scaffold minimum)
+## 9. Explicit Non-Goals (this slice)
 
-- Backend: one pytest path for register → create resume → score job reaches complete with PRD keys; one for apply-edit mutates content
-- Frontend: no E2E required this slice; manual smoke via dev servers
+**Do not build yet** (but design does not block them):
 
----
+- Real tectonic / Ollama / hiring-agent / GitHub OAuth
+- Real PDF/DOCX parsers, template catalog
+- Stripe / plans / quotas
+- Postgres, Redis, S3 wiring
+- Docker/K8s manifests (optional later; not required for scaffold)
+- Multi-region, SSO, orgs/teams
 
-## 10. Implementation Order (for plan)
-
-1. Backend skeleton (config, db, models, main)
-2. Auth
-3. Storage + resumes CRUD
-4. Jobs + scoring stub
-5. Compile / extract / github / chat stubs + apply-edit
-6. Frontend scaffold + auth + resume list
-7. Editor shells + score stepper + chat UI
-8. README run instructions
+**Do build the seams** listed in §3 and §6 so those are adapter drops, not rewrites.
 
 ---
 
-## 11. Open Items (deferred to later slices / PRD §8)
+## 10. Migration map (so we do not “work again”)
 
-- Chatbot interaction model depth (hybrid later)
+| When you go SaaS | Change | Do not change |
+|------------------|--------|---------------|
+| Managed DB | `DATABASE_URL=postgresql+...` + migrate | Models, services, routes |
+| Object storage | New `ObjectStore` impl + env | Keys in DB, resume logic |
+| Horizontal API | More replicas, shared DB/store | JWT auth, routers |
+| Background workers | New `JobRunner` + worker entrypoint | `ScoreJob` schema, poll API |
+| Hosted LLM | New `Coach` impl | Chat request/response |
+| Custom domain | `CORS_ORIGINS`, `VITE_API_URL` | Frontend page structure |
+| Billing | New tables + middleware | Core resume/score flows |
+
+---
+
+## 11. Testing (scaffold minimum)
+
+- Pytest: register → create resume → score job completes with PRD keys; apply-edit mutates content; **cross-user resume access returns 404**
+- Config: app boots with env overrides (smoke)
+- Frontend: manual smoke; API base from env
+
+---
+
+## 12. Implementation Order (for writing-plans)
+
+1. Config + app factory + health + CORS + `.env.example`
+2. DB models + session from `DATABASE_URL`
+3. Auth (hash + JWT + me)
+4. `ObjectStore` local + resumes CRUD (keys, tenant scope)
+5. `JobRunner` local + scoring stub + poll
+6. Compile / extract / github / chat stubs + apply-edit
+7. Frontend scaffold + auth + list
+8. Editor + score stepper + chat UI
+9. README: local run + “SaaS swap” notes (env + adapters)
+
+---
+
+## 13. Open Items (product, not architecture)
+
+- Chatbot UX depth (report / chat / hybrid)
 - Default Ollama model
-- Exact template set
-- Pluggable scoring metrics UX
-- Hosting
+- Template set
+- Pluggable metrics UX
+- Concrete hosting vendor choice
+- Subscription tiers
+
+---
+
+## 14. What changed vs prior approved design
+
+1. Explicit **SaaS-shaped / local-backed** principle and migration map.
+2. **`/api/v1`** prefix for stable public contract.
+3. **`ObjectStore` + keys** instead of absolute paths in DB (`latex_key`).
+4. **`JobRunner` protocol** + job rows in DB (not process-memory as truth).
+5. **12-factor config** + `.env.example`; frontend `VITE_API_URL`.
+6. **Stateless JWT**, CORS, tenant checks as first-class.
+7. DI wiring called out as the single swap site for adapters.
+8. Non-goals: still no cloud infra code; seams only.
+
+This is the minimum extra structure that prevents a rewrite without building the cloud prematurely.
 `}
