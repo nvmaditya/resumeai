@@ -6,6 +6,7 @@ export function ResumeList() {
   const nav = useNavigate()
   const [items, setItems] = useState<Resume[]>([])
   const [err, setErr] = useState('')
+  const [busy, setBusy] = useState(false)
 
   async function load() {
     try {
@@ -23,53 +24,104 @@ export function ResumeList() {
   }, [])
 
   async function create(track: 'latex' | 'structured') {
-    const r = await api<Resume>('/resumes', {
-      method: 'POST',
-      body: JSON.stringify({
-        title: track === 'latex' ? 'LaTeX resume' : 'Structured resume',
-        track,
-        latex_body: track === 'latex' ? '\\documentclass{article}\n\\begin{document}\nYour name\n\\end{document}\n' : undefined,
-      }),
-    })
-    nav(`/resumes/${r.id}`)
+    setBusy(true)
+    try {
+      const r = await api<Resume>('/resumes', {
+        method: 'POST',
+        body: JSON.stringify({
+          title: track === 'latex' ? 'LaTeX resume' : 'Structured resume',
+          track,
+          latex_body:
+            track === 'latex'
+              ? '\\documentclass{article}\n\\begin{document}\nYour name\n\\end{document}\n'
+              : undefined,
+        }),
+      })
+      nav(`/resumes/${r.id}`)
+    } catch (ex) {
+      setErr(ex instanceof Error ? ex.message : 'Create failed')
+    } finally {
+      setBusy(false)
+    }
   }
 
   return (
     <div>
-      <div className="mb-6 flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">Your resumes</h1>
-        <div className="flex gap-2">
+      <div className="mb-8 flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <h1 className="font-display text-3xl font-semibold tracking-tight">Your resumes</h1>
+          <p className="mt-1 text-sm text-[var(--color-soft)]">
+            Multi-resume workspace · LaTeX or structured tracks
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
           <button
+            type="button"
+            disabled={busy}
             onClick={() => void create('latex')}
-            className="rounded-lg bg-emerald-600 px-3 py-2 text-sm hover:bg-emerald-500"
+            className="btn btn-primary"
           >
             New LaTeX
           </button>
           <button
+            type="button"
+            disabled={busy}
             onClick={() => void create('structured')}
-            className="rounded-lg border border-slate-600 px-3 py-2 text-sm hover:bg-slate-800"
+            className="btn btn-secondary"
           >
             New structured
           </button>
         </div>
       </div>
-      {err && <p className="mb-4 text-red-400">{err}</p>}
-      <ul className="space-y-2">
-        {items.map((r) => (
-          <li key={r.id}>
-            <Link
-              to={`/resumes/${r.id}`}
-              className="block rounded-lg border border-slate-800 bg-slate-900 px-4 py-3 hover:border-emerald-700"
-            >
-              <div className="font-medium">{r.title}</div>
-              <div className="text-xs text-slate-400">{r.track}</div>
-            </Link>
-          </li>
-        ))}
-        {items.length === 0 && (
-          <p className="text-slate-400">No resumes yet. Create one to start the loop.</p>
-        )}
-      </ul>
+
+      {err && (
+        <p className="mb-4 text-sm text-[var(--color-danger)]" role="alert">
+          {err}
+        </p>
+      )}
+
+      {items.length === 0 ? (
+        <div className="card flex flex-col items-center px-6 py-16 text-center">
+          <p className="font-display text-lg font-medium">No resumes yet</p>
+          <p className="mt-2 max-w-sm text-sm text-[var(--color-soft)]">
+            Create a LaTeX or structured resume to score, coach, and iterate.
+          </p>
+          <button
+            type="button"
+            className="btn btn-primary mt-6"
+            disabled={busy}
+            onClick={() => void create('latex')}
+          >
+            Create your first resume
+          </button>
+        </div>
+      ) : (
+        <ul className="space-y-2.5">
+          {items.map((r) => (
+            <li key={r.id}>
+              <Link
+                to={`/resumes/${r.id}`}
+                className="card group flex items-center justify-between gap-4 px-5 py-4 transition-colors hover:border-emerald-800/80"
+              >
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="truncate font-medium text-slate-100 group-hover:text-white">
+                      {r.title}
+                    </span>
+                    <span className="chip">{r.track}</span>
+                  </div>
+                  <p className="mt-1 truncate font-mono text-xs text-[var(--color-muted)]">
+                    {r.id.slice(0, 8)}…
+                  </p>
+                </div>
+                <span className="text-[var(--color-muted)] transition-transform group-hover:translate-x-0.5 group-hover:text-[var(--color-accent)]">
+                  →
+                </span>
+              </Link>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   )
 }
