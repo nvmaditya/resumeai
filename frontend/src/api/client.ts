@@ -28,6 +28,32 @@ export async function api<T>(
   return res.json() as Promise<T>
 }
 
+async function fetchBlob(path: string): Promise<Blob> {
+  const headers: Record<string, string> = {}
+  const t = token()
+  if (t) headers.Authorization = `Bearer ${t}`
+  const res = await fetch(`${API}/api/v1${path}`, { headers })
+  if (!res.ok) throw new Error((await res.text()) || res.statusText)
+  return res.blob()
+}
+
+/** Authenticated binary download (e.g. compiled PDF). */
+export async function downloadFile(path: string, filename: string): Promise<void> {
+  const blob = await fetchBlob(path)
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
+/** Object URL for inline PDF preview; caller must revoke. */
+export async function fetchPdfObjectUrl(path: string): Promise<string> {
+  const blob = await fetchBlob(path)
+  return URL.createObjectURL(blob)
+}
+
 export type User = { id: string; email: string }
 export type Resume = {
   id: string

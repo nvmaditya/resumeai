@@ -2,6 +2,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi.responses import Response
 from sqlmodel import Session, select
 
 from app.db import get_session
@@ -164,20 +165,58 @@ def compile_resume(
 ) -> dict:
     resume = _load_owned(session, user, resume_id)
     compiler = request.app.state.compiler
-    tex = b""
+    latex = None
     if resume.latex_key and store.exists(resume.latex_key):
-        tex = store.get(resume.latex_key)
-    elif resume.structured_json:
-        # ponytail: minimal tex from structured; real templates later
-        name = (resume.structured_json.get("basics") or {}).get("name") or "Candidate"
-        tex = f"\\documentclass{{article}}\\begin{{document}}{name}\\end{{document}}".encode()
-    result = compiler.compile(tex)
+        latex = store.get(resume.latex_key).decode("utf-8", errors="replace")
+    result = compiler.compile(
+        title=resume.title or "Resume",
+        track=resume.track,
+        latex=latex,
+        structured=resume.structured_json,
+    )
     pdf_key = f"users/{user.id}/resumes/{resume.id}/out.pdf"
     if result.get("pdf_bytes"):
         store.put(pdf_key, result["pdf_bytes"])
-        result = {**result, "pdf_key": pdf_key}
-        result.pop("pdf_bytes", None)
+        result = {
+            **{k: v for k, v in result.items() if k != "pdf_bytes"},
+            "pdf_key": pdf_key,
+            "download_path": f"/api/v1/resumes/{resume.id}/pdf",
+            "preview_path": f"/api/v1/resumes/{resume.id}/pdf?inline=1",
+        }
     return result
+
+
+@router.get("/{resume_id}/pdf")
+def download_pdf(
+    resume_id: str,
+    inline: bool = False,
+    user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+    store: ObjectStore = Depends(get_store),
+) -> Response:
+    """Download or inline-preview compiled PDF for an owned resume."""
+    resume = _load_owned(session, user, resume_id)
+    pdf_key = f"users/{user.id}/resumes/{resume.id}/out.pdf"
+    if not store.exists(pdf_key):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="PDF not compiled yet")
+    data = store.get(pdf_key)
+    # Guard: reject tiny corrupt stubs from older compiles
+    if len(data) < 200 or not data.startswith(b"%PDF"):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="PDF is invalid or outdated — recompile",
+        )
+    filename = f"{(resume.title or 'resume').replace(' ', '_')}.pdf"
+    disp = "inline" if inline else "attachment"
+    return Response(
+        content=data,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'{disp}; filename="{filename}"',
+            "Cache-Control": "no-store",
+            "Content-Length": str(len(data)),
+        },
+    )
 
 
 @router.post("/{resume_id}/extract")

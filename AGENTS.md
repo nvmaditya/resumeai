@@ -1,0 +1,78 @@
+# AGENTS.md — ResumeAI
+
+Rules for coding agents working in this repository.
+
+## Product constraints
+
+- Local-first MVP, SaaS-shaped seams (`ObjectStore`, `JobRunner`, `ScoreEngine`, env config).
+- Ponytail: minimum code; no new deps if stdlib/existing stack covers it.
+- Trust boundaries: coach uses **fixed actions only** (no free-form user messages); sanitize JD/edits.
+- PDF: layout engine produces **valid** letter PDFs (margins/wrap). Full LaTeX = tectonic later.
+
+## Git versioning & GitHub push (required)
+
+Keep history **version-wise** so each meaningful slice is a tag + push.
+
+### When to cut a version
+
+| Change type | Version bump | Example tag |
+|-------------|--------------|-------------|
+| Scaffold / big feature slice | minor | `v0.2.0` |
+| Bugfix / polish within slice | patch | `v0.2.1` |
+| Breaking API/contract | minor until 1.0 | `v0.3.0` |
+
+### Agent checklist after implementable work
+
+1. Run relevant tests (`backend`: `pytest`; `frontend`: `npm run build`).
+2. Commit with conventional message (`feat:`, `fix:`, `docs:`, `chore:`).
+3. Tag if this is a shippable slice:
+   ```bash
+   git tag -a vX.Y.Z -m "vX.Y.Z — short summary"
+   ```
+4. Push branch **and** tags:
+   ```bash
+   git push -u origin HEAD
+   git push origin vX.Y.Z
+   # or: git push origin --tags
+   ```
+5. Update this table when adding a release:
+
+| Version | Summary |
+|---------|---------|
+| v0.1.0 | Scaffold + hiring-agent vendor + auth/resumes/score stubs |
+| v0.2.0 | Light UI, structured form, safe coach, PDF layout + live preview |
+
+### Repo
+
+- Remote: set after `create_repository` / first push.
+- Default branch: `main`.
+- Do **not** commit secrets, `.env`, `data/`, personal `resume/` samples, or `.venv/`.
+
+## Dev commands
+
+```powershell
+# Backend (Python 3.12)
+cd backend
+$env:PYTHONPATH = (Get-Location).Path
+.\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --port 8000
+
+# Frontend
+cd frontend
+npm run dev
+```
+
+## Modules (replaceable)
+
+| Path | Role |
+|------|------|
+| `backend/app/compile/` | PDF layout / future tectonic |
+| `backend/app/scoring/` | stub or hiring-agent |
+| `backend/app/chat/` | coach + injection safety |
+| `backend/app/storage/` | LocalObjectStore → S3 later |
+| `backend/vendor/hiring-agent` | vendored MIT scorer |
+
+## Do not
+
+- Free-form LLM chat from the client.
+- Absolute filesystem paths in the DB (use object keys).
+- Fake/invalid PDF stubs that open as corrupt.

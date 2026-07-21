@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { api, type Job, type Resume } from '../api/client'
+import { api, downloadFile, fetchPdfObjectUrl, type Job, type Resume } from '../api/client'
 import { ProgressStepper } from '../components/ProgressStepper'
 import {
   StructuredForm,
@@ -37,6 +37,22 @@ export function ResumeEditor() {
   const [scoring, setScoring] = useState(false)
   const [coaching, setCoaching] = useState(false)
   const [dirty, setDirty] = useState(false)
+  const [hasPdf, setHasPdf] = useState(false)
+  const [showPreview, setShowPreview] = useState(false)
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null)
+  const [previewBusy, setPreviewBusy] = useState(false)
+  const previewUrlRef = useRef<string | null>(null)
+  const compilingRef = useRef(false)
+
+  const revokePreview = useCallback(() => {
+    if (previewUrlRef.current) {
+      URL.revokeObjectURL(previewUrlRef.current)
+      previewUrlRef.current = null
+    }
+    setPreviewUrl(null)
+  }, [])
+
+  useEffect(() => () => revokePreview(), [revokePreview])
 
   async function load() {
     const r = await api<Resume>(`/resumes/${id}`)
@@ -49,6 +65,9 @@ export function ResumeEditor() {
 
   useEffect(() => {
     void load()
+    revokePreview()
+    setShowPreview(false)
+    setHasPdf(false)
   }, [id])
 
   async function save() {
@@ -65,14 +84,74 @@ export function ResumeEditor() {
     setDirty(false)
     setStatus('Saved')
     toast.push('Saved')
+    return r
   }
 
-  async function compile() {
-    const out = await api<{ message: string; pdf_key?: string }>(`/resumes/${id}/compile`, {
-      method: 'POST',
-    })
-    setStatus(out.message + (out.pdf_key ? ` · ${out.pdf_key}` : ''))
-    toast.push('Compile finished')
+  const loadPreviewBlob = useCallback(async () => {
+    const url = await fetchPdfObjectUrl(`/resumes/${id}/pdf?inline=1`)
+    if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current)
+    previewUrlRef.current = url
+    setPreviewUrl(url)
+    setHasPdf(true)
+  }, [id])
+
+  const compileAndPreview = useCallback(
+    async (opts?: { quiet?: boolean }) => {
+      if (compilingRef.current) return
+      compilingRef.current = true
+      setPreviewBusy(true)
+      try {
+        if (dirty) {
+          const body =
+            resume?.track === 'latex'
+              ? { title, latex_body: latex }
+              : { title, structured_json: toApi(structured) }
+          const r = await api<Resume>(`/resumes/${id}`, {
+            method: 'PATCH',
+            body: JSON.stringify(body),
+          })
+          setResume(r)
+          setDirty(false)
+        }
+        const out = await api<{ message: string; pdf_key?: string; bytes?: number }>(
+          `/resumes/${id}/compile`,
+          { method: 'POST' },
+        )
+        setShowPreview(true)
+        await loadPreviewBlob()
+        setStatus(
+          `Preview updated${out.bytes ? ` · ${out.bytes} bytes` : ''} · letter layout with 0.75″ margins`,
+        )
+        if (!opts?.quiet) toast.push('Preview ready')
+      } catch (ex) {
+        setStatus(ex instanceof Error ? ex.message : 'Compile failed')
+        if (!opts?.quiet) toast.push(ex instanceof Error ? ex.message : 'Compile failed')
+      } finally {
+        setPreviewBusy(false)
+        compilingRef.current = false
+      }
+    },
+    [dirty, id, latex, loadPreviewBlob, resume?.track, structured, title, toast],
+  )
+
+  // Live preview: recompile when content changes while preview is open
+  useEffect(() => {
+    if (!showPreview || !resume) return
+    const t = window.setTimeout(() => {
+      void compileAndPreview({ quiet: true })
+    }, 900)
+    return () => window.clearTimeout(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional debounce on content
+  }, [latex, structured, title, showPreview])
+
+  async function downloadPdf() {
+    try {
+      if (!hasPdf) await compileAndPreview({ quiet: true })
+      await downloadFile(`/resumes/${id}/pdf`, `${(title || 'resume').replace(/\s+/g, '_')}.pdf`)
+      toast.push('Download started')
+    } catch (ex) {
+      toast.push(ex instanceof Error ? ex.message : 'Download failed — compile first')
+    }
   }
 
   async function score() {
@@ -88,7 +167,11 @@ export function ResumeEditor() {
         setJob(cur)
         if (cur.status === 'complete' || cur.status === 'failed') {
           setStatus(cur.status)
-          toast.push(cur.status === 'complete' ? `Score: ${cur.result_json?.overall_score ?? '—'}` : 'Score failed')
+          toast.push(
+            cur.status === 'complete'
+              ? `Score: ${cur.result_json?.overall_score ?? '—'}`
+              : 'Score failed',
+          )
           break
         }
       }
@@ -133,6 +216,7 @@ export function ResumeEditor() {
     setDirty(false)
     setStatus('Edit applied — re-score manually when ready')
     toast.push('Edit applied')
+    if (showPreview) void compileAndPreview({ quiet: true })
   }
 
   async function remove() {
@@ -182,8 +266,21 @@ export function ResumeEditor() {
           <button type="button" onClick={() => void save()} className="btn btn-secondary">
             Save
           </button>
-          <button type="button" onClick={() => void compile()} className="btn btn-secondary">
-            Compile
+          <button
+            type="button"
+            onClick={() => void compileAndPreview()}
+            className="btn btn-secondary"
+            disabled={previewBusy}
+          >
+            {previewBusy ? 'Compiling…' : 'Compile & preview'}
+          </button>
+          <button
+            type="button"
+            onClick={() => void downloadPdf()}
+            className="btn btn-secondary"
+            title="Download last compile"
+          >
+            Download PDF
           </button>
           <button type="button" onClick={() => void score()} className="btn btn-primary" disabled={scoring}>
             {scoring ? 'Scoring…' : 'Re-check score'}
@@ -200,154 +297,196 @@ export function ResumeEditor() {
         </p>
       )}
 
-      <div className="grid gap-5 lg:grid-cols-12">
-        <section className="card flex flex-col p-4 lg:col-span-7">
-          <div className="mb-3 flex items-center justify-between">
-            <h2 className="font-display text-sm font-semibold tracking-wide">
-              {resume.track === 'latex' ? 'LaTeX editor' : 'Structured form'}
-            </h2>
-          </div>
-          {resume.track === 'latex' ? (
-            <textarea
-              className="input min-h-[28rem] flex-1 resize-y font-mono text-[13px] leading-relaxed"
-              value={latex}
-              onChange={(e) => {
-                setLatex(e.target.value)
-                setDirty(true)
-              }}
-              spellCheck={false}
-            />
-          ) : (
-            <StructuredForm
-              value={structured}
-              onChange={(v) => {
-                setStructured(v)
-                setDirty(true)
-              }}
-            />
-          )}
-        </section>
-
-        <div className="flex flex-col gap-5 lg:col-span-5">
-          <section className="card p-4">
-            <div className="flex items-center justify-between gap-2">
-              <h2 className="font-display text-sm font-semibold tracking-wide">ATS score</h2>
-              {overall != null && job?.status === 'complete' && (
-                <button type="button" className="btn btn-secondary text-xs py-1" onClick={copyScore}>
-                  Copy
-                </button>
-              )}
-            </div>
-            {job ? (
-              <div className="mt-3 space-y-4">
-                <ProgressStepper status={job.status} />
-                {job.status === 'processing' || job.status === 'queued' ? (
-                  <div className="rounded-lg border border-[var(--color-line)] bg-[var(--color-panel-2)] px-4 py-6 text-center">
-                    <p className="font-display text-3xl font-semibold text-[var(--color-muted)]">…</p>
-                    <p className="mt-1 text-sm text-[var(--color-soft)]">Scoring in progress</p>
-                  </div>
-                ) : job.result_json ? (
-                  <>
-                    <div className="flex items-end gap-2">
-                      <span className="font-display text-5xl font-semibold tabular-nums text-[var(--color-accent)]">
-                        {overall ?? '—'}
-                      </span>
-                      <span className="mb-2 text-sm text-[var(--color-muted)]">/100</span>
-                    </div>
-                    <ul className="space-y-2">
-                      {cats.map((c) => (
-                        <li
-                          key={c.name}
-                          className="rounded-lg border border-[var(--color-line)] bg-[var(--color-panel-2)] p-3"
-                        >
-                          <div className="flex items-center justify-between gap-2 text-sm">
-                            <span className="font-medium">{c.name}</span>
-                            <span className="tabular-nums text-[var(--color-soft)]">{c.score}</span>
-                          </div>
-                          <div className="mt-2 h-1 overflow-hidden rounded-full bg-[var(--color-line)]">
-                            <div
-                              className="h-full rounded-full bg-[var(--color-accent)]"
-                              style={{ width: `${Math.min(100, Math.max(0, c.score))}%` }}
-                            />
-                          </div>
-                          {c.evidence && (
-                            <p className="mt-2 text-xs leading-relaxed text-[var(--color-muted)]">
-                              {c.evidence}
-                            </p>
-                          )}
-                        </li>
-                      ))}
-                    </ul>
-                  </>
-                ) : null}
-                {job.error && <p className="text-sm text-[var(--color-danger)]">{job.error}</p>}
+      {/* Main workspace + optional PDF preview rail */}
+      <div className={`grid gap-5 ${showPreview ? 'xl:grid-cols-12' : ''}`}>
+        <div className={`space-y-5 ${showPreview ? 'xl:col-span-7' : ''}`}>
+          <div className="grid gap-5 lg:grid-cols-12">
+            <section className="card flex flex-col p-4 lg:col-span-7">
+              <div className="mb-3 flex items-center justify-between">
+                <h2 className="font-display text-sm font-semibold tracking-wide">
+                  {resume.track === 'latex' ? 'LaTeX editor' : 'Structured form'}
+                </h2>
               </div>
-            ) : (
-              <p className="mt-3 text-sm text-[var(--color-muted)]">
-                Run <strong>Re-check score</strong> for async results with evidence.
-              </p>
-            )}
-          </section>
-
-          <section className="card p-4">
-            <h2 className="font-display text-sm font-semibold tracking-wide">JD-aware coach</h2>
-            <p className="mt-1 text-xs text-[var(--color-muted)]">
-              Fixed actions only — free-form chat is disabled to reduce prompt injection risk.
-            </p>
-            <div className="mt-3 space-y-3">
-              <div>
-                <label className="label" htmlFor="jd">
-                  Job description (optional, max 4k)
-                </label>
+              {resume.track === 'latex' ? (
                 <textarea
-                  id="jd"
-                  className="input h-24 resize-y text-sm"
-                  placeholder="Paste JD for align-to-JD action"
-                  maxLength={4000}
-                  value={jd}
-                  onChange={(e) => setJd(e.target.value)}
+                  className="input min-h-[28rem] flex-1 resize-y font-mono text-[13px] leading-relaxed"
+                  value={latex}
+                  onChange={(e) => {
+                    setLatex(e.target.value)
+                    setDirty(true)
+                  }}
+                  spellCheck={false}
                 />
-                <p className="mt-1 text-xs text-[var(--color-muted)]">{jd.length}/4000</p>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                {COACH_ACTIONS.map((a) => (
-                  <button
-                    key={a.id}
-                    type="button"
-                    className="btn btn-primary text-xs"
-                    disabled={coaching}
-                    onClick={() => void runCoach(a.id)}
-                  >
-                    {a.label}
-                  </button>
-                ))}
-              </div>
-              {chatReply && (
-                <p className="rounded-lg border border-[var(--color-line)] bg-[var(--color-panel-2)] p-3 text-sm leading-relaxed">
-                  {chatReply}
-                </p>
+              ) : (
+                <StructuredForm
+                  value={structured}
+                  onChange={(v) => {
+                    setStructured(v)
+                    setDirty(true)
+                  }}
+                />
               )}
-              {proposed && (
-                <div className="rounded-xl border border-amber-500/50 bg-amber-500/5 p-3">
-                  <p className="text-sm font-medium text-amber-700 dark:text-amber-300">
-                    Proposed edit · <span className="font-mono text-xs">{proposed.section}</span>
-                  </p>
-                  <pre className="mt-2 max-h-36 overflow-auto whitespace-pre-wrap font-mono text-xs leading-relaxed text-[var(--color-soft)]">
-                    {proposed.after}
-                  </pre>
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    <button type="button" onClick={() => void applyEdit()} className="btn btn-warn">
-                      Approve & apply
+            </section>
+
+            <div className="flex flex-col gap-5 lg:col-span-5">
+              <section className="card p-4">
+                <div className="flex items-center justify-between gap-2">
+                  <h2 className="font-display text-sm font-semibold tracking-wide">ATS score</h2>
+                  {overall != null && job?.status === 'complete' && (
+                    <button type="button" className="btn btn-secondary text-xs py-1" onClick={copyScore}>
+                      Copy
                     </button>
-                    <button type="button" className="btn btn-secondary" onClick={() => setProposed(null)}>
-                      Dismiss
-                    </button>
+                  )}
+                </div>
+                {job ? (
+                  <div className="mt-3 space-y-4">
+                    <ProgressStepper status={job.status} />
+                    {job.status === 'processing' || job.status === 'queued' ? (
+                      <div className="rounded-lg border border-[var(--color-line)] bg-[var(--color-panel-2)] px-4 py-6 text-center">
+                        <p className="font-display text-3xl font-semibold text-[var(--color-muted)]">…</p>
+                        <p className="mt-1 text-sm text-[var(--color-soft)]">Scoring in progress</p>
+                      </div>
+                    ) : job.result_json ? (
+                      <>
+                        <div className="flex items-end gap-2">
+                          <span className="font-display text-5xl font-semibold tabular-nums text-[var(--color-accent)]">
+                            {overall ?? '—'}
+                          </span>
+                          <span className="mb-2 text-sm text-[var(--color-muted)]">/100</span>
+                        </div>
+                        <ul className="space-y-2">
+                          {cats.map((c) => (
+                            <li
+                              key={c.name}
+                              className="rounded-lg border border-[var(--color-line)] bg-[var(--color-panel-2)] p-3"
+                            >
+                              <div className="flex items-center justify-between gap-2 text-sm">
+                                <span className="font-medium">{c.name}</span>
+                                <span className="tabular-nums text-[var(--color-soft)]">{c.score}</span>
+                              </div>
+                              <div className="mt-2 h-1 overflow-hidden rounded-full bg-[var(--color-line)]">
+                                <div
+                                  className="h-full rounded-full bg-[var(--color-accent)]"
+                                  style={{ width: `${Math.min(100, Math.max(0, c.score))}%` }}
+                                />
+                              </div>
+                              {c.evidence && (
+                                <p className="mt-2 text-xs leading-relaxed text-[var(--color-muted)]">
+                                  {c.evidence}
+                                </p>
+                              )}
+                            </li>
+                          ))}
+                        </ul>
+                      </>
+                    ) : null}
+                    {job.error && <p className="text-sm text-[var(--color-danger)]">{job.error}</p>}
                   </div>
+                ) : (
+                  <p className="mt-3 text-sm text-[var(--color-muted)]">
+                    Run <strong>Re-check score</strong> for async results with evidence.
+                  </p>
+                )}
+              </section>
+
+              <section className="card p-4">
+                <h2 className="font-display text-sm font-semibold tracking-wide">JD-aware coach</h2>
+                <p className="mt-1 text-xs text-[var(--color-muted)]">
+                  Fixed actions only — free-form chat is disabled to reduce prompt injection risk.
+                </p>
+                <div className="mt-3 space-y-3">
+                  <div>
+                    <label className="label" htmlFor="jd">
+                      Job description (optional, max 4k)
+                    </label>
+                    <textarea
+                      id="jd"
+                      className="input h-24 resize-y text-sm"
+                      placeholder="Paste JD for align-to-JD action"
+                      maxLength={4000}
+                      value={jd}
+                      onChange={(e) => setJd(e.target.value)}
+                    />
+                    <p className="mt-1 text-xs text-[var(--color-muted)]">{jd.length}/4000</p>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {COACH_ACTIONS.map((a) => (
+                      <button
+                        key={a.id}
+                        type="button"
+                        className="btn btn-primary text-xs"
+                        disabled={coaching}
+                        onClick={() => void runCoach(a.id)}
+                      >
+                        {a.label}
+                      </button>
+                    ))}
+                  </div>
+                  {chatReply && (
+                    <p className="rounded-lg border border-[var(--color-line)] bg-[var(--color-panel-2)] p-3 text-sm leading-relaxed">
+                      {chatReply}
+                    </p>
+                  )}
+                  {proposed && (
+                    <div className="rounded-xl border border-amber-500/50 bg-amber-500/5 p-3">
+                      <p className="text-sm font-medium text-amber-700">
+                        Proposed edit · <span className="font-mono text-xs">{proposed.section}</span>
+                      </p>
+                      <pre className="mt-2 max-h-36 overflow-auto whitespace-pre-wrap font-mono text-xs leading-relaxed text-[var(--color-soft)]">
+                        {proposed.after}
+                      </pre>
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <button type="button" onClick={() => void applyEdit()} className="btn btn-warn">
+                          Approve & apply
+                        </button>
+                        <button type="button" className="btn btn-secondary" onClick={() => setProposed(null)}>
+                          Dismiss
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </section>
+            </div>
+          </div>
+        </div>
+
+        {showPreview && (
+          <aside className="card flex flex-col overflow-hidden xl:col-span-5 xl:sticky xl:top-20 xl:max-h-[calc(100vh-6rem)]">
+            <div className="flex items-center justify-between border-b border-[var(--color-line)] px-4 py-3">
+              <div>
+                <h2 className="font-display text-sm font-semibold">PDF preview</h2>
+                <p className="text-xs text-[var(--color-muted)]">
+                  Live · letter · 0.75″ margins
+                  {previewBusy ? ' · updating…' : ''}
+                </p>
+              </div>
+              <button
+                type="button"
+                className="btn btn-secondary text-xs py-1"
+                onClick={() => {
+                  setShowPreview(false)
+                  revokePreview()
+                }}
+              >
+                Close
+              </button>
+            </div>
+            <div className="min-h-[28rem] flex-1 bg-[var(--color-panel-2)] p-3">
+              {previewUrl ? (
+                <iframe
+                  title="Resume PDF preview"
+                  src={previewUrl}
+                  className="h-full min-h-[28rem] w-full rounded-lg border border-[var(--color-line)] bg-white"
+                />
+              ) : (
+                <div className="flex h-full min-h-[28rem] items-center justify-center text-sm text-[var(--color-muted)]">
+                  {previewBusy ? 'Rendering…' : 'No preview yet'}
                 </div>
               )}
             </div>
-          </section>
-        </div>
+          </aside>
+        )}
       </div>
     </div>
   )
