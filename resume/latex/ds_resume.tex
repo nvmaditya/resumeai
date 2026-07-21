@@ -1,0 +1,142 @@
+\documentclass[11pt,letterpaper]{article}
+
+\usepackage[margin=0.3in]{geometry}
+\usepackage{hyperref}
+\usepackage{enumitem}
+\usepackage{titlesec}
+\usepackage{xcolor}
+
+\definecolor{sectioncolor}{HTML}{333333}
+\definecolor{linkcolor}{HTML}{0057B8}
+
+\hypersetup{
+    colorlinks=true,
+    linkcolor=linkcolor,
+    urlcolor=linkcolor
+}
+
+\titleformat{\section}
+  {\normalfont\Large\bfseries\color{sectioncolor}}
+  {}{0em}{}[\titlerule]
+\titlespacing*{\section}{0pt}{2pt}{5pt}
+
+\setlength{\parindent}{0pt}
+
+\newcommand{\resumeItem}[1]{\item{#1}}
+
+\newcommand{\resumeSubheading}[4]{
+  \vspace{-2pt}
+  \item
+    \begin{tabular*}{0.97\textwidth}[t]{l@{\extracolsep{\fill}}r}
+      \textbf{#1} & \textbf{#2} \\
+      #3 & #4 \\
+    \end{tabular*}\vspace{-5pt}
+}
+
+\newcommand{\skill}[2]{\textbf{#1:} #2 \\}
+
+\begin{document}
+
+\begin{center}
+    {\huge \textbf{Aditya Khandelwal}} \\
+    \vspace{5pt}
+    Jaipur, Rajasthan $\cdot$ +91 9828460280 \\
+    \href{mailto:adityakhandelwal0271@gmail.com}{Email} $\cdot$
+    \href{https://www.linkedin.com/in/nvmaditya/}{LinkedIn} $\cdot$
+    \href{https://github.com/nvmaditya}{GitHub} $\cdot$
+    \href{https://theadityakhandelwal.in/}{Portfolio}
+\end{center}
+
+\section{PROFESSIONAL SUMMARY}
+CS undergraduate with experience in data-driven systems, machine learning, and backend data pipelines using Python. Built end-to-end workflows involving data extraction, cleaning, transformation, and analysis to solve real-world problems. Experienced in exploratory data analysis, statistical modeling, and automation using Python (pandas, NumPy, scikit-learn) and SQL. Worked on time series forecasting and real-time computer vision systems.
+
+\section{TECHNICAL SKILLS}
+\skill{Languages}{Python, SQL, JavaScript, TypeScript}
+\skill{Data Science}{Pandas, NumPy, Scikit-learn, Matplotlib, Plotly, EDA, Hypothesis Testing, Feature Engineering}
+\skill{Machine Learning}{Supervised Learning, Time Series Forecasting, Model Evaluation, Deep Learning (PyTorch, YOLOv8)}
+\skill{Data Engineering}{Data Pipelines, ETL, Data Cleaning, API Integration, Web Scraping}
+\skill{Databases}{PostgreSQL, MySQL, NoSQL Basics}
+\skill{Backend}{FastAPI, REST APIs, Automation Scripts}
+\skill{Tools}{Excel, Git, Docker, Linux}
+
+\section{PROFESSIONAL EXPERIENCE}
+\begin{itemize}[leftmargin=*]
+
+\resumeSubheading
+{AI Engineer Intern}{Aug 2025 -- Mar 2026}
+{Sentient Scripts, Discovery Lab SRMIST}{}
+\begin{itemize}[leftmargin=*]
+    \item Built multi-source data aggregation pipelines in Python that collected, normalized, and consolidated structured intelligence from external feeds for real-time monitoring and trend tracking.
+    \item Developed an LLM-based information extraction module that processed unstructured text to identify and structure domain-specific technical metadata, enabling automated correlation across large datasets.
+    \item Designed an end-to-end intelligence pipeline integrating scheduled data collection, LLM-driven correlation with structured output parsing (Pydantic), and automated report generation with trend visualizations.
+\end{itemize}
+
+\resumeSubheading
+{Research Intern}{Apr 2025 -- Jan 2026}
+{Samsung R\&D Institute India Bangalore (Remote)}{}
+\begin{itemize}[leftmargin=*]
+    \item Worked on time series forecasting using transformer-based models (TOTEM) in PyTorch across multiple datasets.
+    \item Conducted comparative analysis of forecasting performance using different input representations and tokenization strategies.
+    \item Evaluated model accuracy using statistical metrics and analyzed generalization across forecasting horizons.
+\end{itemize}
+
+\resumeSubheading
+{Python Developer Intern}{Nov 2025 -- Jan 2026}
+{Infosys Springboard (Remote)}{}
+\begin{itemize}[leftmargin=*]
+    \item Built a real-time crowd estimation system using YOLOv8 and OpenCV to generate time-series data from video streams.
+    \item Processed and analyzed detection data to identify patterns and threshold-based anomalies.
+    \item Optimized multiprocessing pipelines for efficient real-time data processing and reduced latency.
+\end{itemize}
+
+\end{itemize}
+
+\section{TECHNICAL PROJECTS}
+\begin{itemize}[leftmargin=*]
+
+\item \textbf{Automatic Number Plate Recognition (ANPR) 
+\href{https://github.com/nvmaditya/ANPR}{[GitHub]}} \\
+\textit{\small Python, YOLOv8, EasyOCR, OpenCV, SORT}
+\begin{itemize}[leftmargin=*]
+    \item Trained a custom YOLOv8 license plate detector using Open Images dataset in YOLO format and exported optimized weights for deployment.
+    \item Built an end-to-end ANPR pipeline combining vehicle detection, license plate localization, and OCR-based text extraction.
+    \item Implemented multi-object tracking (SORT) to maintain vehicle identities across frames and improve OCR consistency.
+    \item Designed both batch and real-time processing pipelines with CSV logging, interpolation of missing detections, and annotated video output.
+\end{itemize}
+
+\item \textbf{Real-Time Crowd Counting and Analysis 
+\href{https://github.com/nvmaditya/CrowdCount}{[GitHub]}} \\
+\textit{\small Python, YOLOv8, OpenCV, Multiprocessing}
+\begin{itemize}[leftmargin=*]
+    \item Developed a real-time crowd counting system using object detection to generate structured time-series data from video streams.
+    \item Processed detection outputs to analyze crowd density patterns and threshold-based anomalies.
+    \item Optimized concurrent video pipelines using multiprocessing for low-latency performance.
+\end{itemize}
+
+\item \textbf{PromptGraph -- Multi-Agent Pipeline Generator 
+\href{https://github.com/nvmaditya/PromptGraph}{[GitHub]}} \\
+\textit{\small Python, LangGraph, FastAPI, Pydantic}
+\begin{itemize}[leftmargin=*]
+    \item Built a multi-stage pipeline converting unstructured inputs into structured representations using LLMs.
+    \item Designed schema validation and transformation layers using Pydantic for reliable data processing.
+    \item Implemented retry, error handling, and structured output pipelines for robust automation workflows.
+\end{itemize}
+
+\end{itemize}
+
+\section{HACKATHONS \& ACHIEVEMENTS}
+\begin{itemize}[leftmargin=*]
+\item Code Zero Hackathon -- 2nd Place (National Level)
+\end{itemize}
+
+\section{EDUCATION}
+\begin{itemize}[leftmargin=*]
+\resumeSubheading
+{SRM Institute of Science and Technology}{2023 -- 2027}
+{B.Tech in Computer Science and Engineering}{CGPA: 8.90}
+\resumeSubheading
+{BVB Vidyashram}{}
+{Senior Secondary (Class XII)}{82.80\%}
+\end{itemize}
+
+\end{document}

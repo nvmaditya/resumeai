@@ -270,6 +270,10 @@ def chat_resume(
     session: Session = Depends(get_session),
     store: ObjectStore = Depends(get_store),
 ) -> ChatResponse:
+    from fastapi import HTTPException
+
+    from app.chat.safety import sanitize_jd
+
     resume = _load_owned(session, user, resume_id)
     completed = session.exec(
         select(ScoreJob).where(
@@ -283,12 +287,15 @@ def chat_resume(
     if resume.latex_key and store.exists(resume.latex_key):
         latex = store.get(resume.latex_key).decode("utf-8", errors="replace")
     coach = request.app.state.coach
-    return coach.advise(
-        resume_content=latex or str(resume.structured_json or {}),
-        score_json=latest.result_json if latest else None,
-        job_description=body.job_description,
-        message=body.message,
-    )
+    try:
+        return coach.advise(
+            resume_content=latex or str(resume.structured_json or {}),
+            score_json=latest.result_json if latest else None,
+            job_description=sanitize_jd(body.job_description),
+            action=body.action,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
 
 @router.post("/{resume_id}/apply-edit", response_model=ResumeOut)
@@ -299,19 +306,24 @@ def apply_edit(
     session: Session = Depends(get_session),
     store: ObjectStore = Depends(get_store),
 ) -> ResumeOut:
+    from app.chat.safety import MAX_EDIT_CHARS, sanitize_text
+
     resume = _load_owned(session, user, resume_id)
-    if body.section == "latex" or resume.track == "latex":
+    after = sanitize_text(body.after, max_len=MAX_EDIT_CHARS, field="after")
+    section = (body.section or "")[:64]
+    if section == "latex" or (resume.track == "latex" and section != "summary"):
         key = resume.latex_key or _latex_key(user.id, resume.id)
-        store.put(key, body.after.encode("utf-8"))
+        store.put(key, after.encode("utf-8"))
         resume.latex_key = key
     else:
         data = dict(resume.structured_json or _empty_structured())
-        # ponytail: dotted path set only for simple keys; nested later if needed
-        parts = body.section.split(".")
-        if len(parts) == 1:
-            data[parts[0]] = body.after
+        if section in ("summary", "basics.summary"):
+            basics = dict(data.get("basics") or {})
+            basics["summary"] = after
+            data["basics"] = basics
         else:
-            data[parts[0]] = body.after
+            # ponytail: top-level key only
+            data[section.split(".")[0]] = after
         resume.structured_json = data
     resume.updated_at = datetime.now(timezone.utc)
     session.add(resume)

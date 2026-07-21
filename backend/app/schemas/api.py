@@ -69,8 +69,15 @@ class ProposedEdit(BaseModel):
 
 
 class ChatRequest(BaseModel):
-    message: str
-    job_description: Optional[str] = None
+    """Coach uses fixed actions only — no free-form user messages (injection surface)."""
+
+    action: Literal[
+        "improve_score",
+        "strengthen_projects",
+        "align_jd",
+        "quantify_impact",
+    ]
+    job_description: Optional[str] = Field(default=None, max_length=4000)
 
 
 class ChatResponse(BaseModel):

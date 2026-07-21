@@ -1,15 +1,31 @@
 import { useEffect, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams } from 'react-router-dom'
 import { api, type Job, type Resume } from '../api/client'
 import { ProgressStepper } from '../components/ProgressStepper'
+import {
+  StructuredForm,
+  fromApi,
+  toApi,
+  type StructuredResume,
+} from '../components/StructuredForm'
+import { useToast } from '../toast'
+
+const COACH_ACTIONS = [
+  { id: 'improve_score', label: 'Improve score' },
+  { id: 'strengthen_projects', label: 'Strengthen projects' },
+  { id: 'align_jd', label: 'Align to JD' },
+  { id: 'quantify_impact', label: 'Quantify impact' },
+] as const
 
 export function ResumeEditor() {
   const { id } = useParams()
+  const nav = useNavigate()
+  const toast = useToast()
   const [resume, setResume] = useState<Resume | null>(null)
+  const [title, setTitle] = useState('')
   const [latex, setLatex] = useState('')
-  const [structuredText, setStructuredText] = useState('{}')
+  const [structured, setStructured] = useState<StructuredResume>(fromApi(null))
   const [jd, setJd] = useState('')
-  const [message, setMessage] = useState('How can I improve my score?')
   const [chatReply, setChatReply] = useState('')
   const [proposed, setProposed] = useState<{
     section: string
@@ -19,12 +35,16 @@ export function ResumeEditor() {
   const [job, setJob] = useState<Job | null>(null)
   const [status, setStatus] = useState('')
   const [scoring, setScoring] = useState(false)
+  const [coaching, setCoaching] = useState(false)
+  const [dirty, setDirty] = useState(false)
 
   async function load() {
     const r = await api<Resume>(`/resumes/${id}`)
     setResume(r)
+    setTitle(r.title)
     setLatex(r.latex_body || '')
-    setStructuredText(JSON.stringify(r.structured_json || {}, null, 2))
+    setStructured(fromApi(r.structured_json as Record<string, unknown>))
+    setDirty(false)
   }
 
   useEffect(() => {
@@ -34,14 +54,17 @@ export function ResumeEditor() {
   async function save() {
     const body =
       resume?.track === 'latex'
-        ? { latex_body: latex }
-        : { structured_json: JSON.parse(structuredText) }
+        ? { title, latex_body: latex }
+        : { title, structured_json: toApi(structured) }
     const r = await api<Resume>(`/resumes/${id}`, {
       method: 'PATCH',
       body: JSON.stringify(body),
     })
     setResume(r)
+    setTitle(r.title)
+    setDirty(false)
     setStatus('Saved')
+    toast.push('Saved')
   }
 
   async function compile() {
@@ -49,9 +72,11 @@ export function ResumeEditor() {
       method: 'POST',
     })
     setStatus(out.message + (out.pdf_key ? ` · ${out.pdf_key}` : ''))
+    toast.push('Compile finished')
   }
 
   async function score() {
+    if (dirty) await save()
     setScoring(true)
     setStatus('Scoring…')
     try {
@@ -63,6 +88,7 @@ export function ResumeEditor() {
         setJob(cur)
         if (cur.status === 'complete' || cur.status === 'failed') {
           setStatus(cur.status)
+          toast.push(cur.status === 'complete' ? `Score: ${cur.result_json?.overall_score ?? '—'}` : 'Score failed')
           break
         }
       }
@@ -71,16 +97,27 @@ export function ResumeEditor() {
     }
   }
 
-  async function chat() {
-    const out = await api<{ reply: string; proposed_edit: typeof proposed }>(
-      `/resumes/${id}/chat`,
-      {
-        method: 'POST',
-        body: JSON.stringify({ message, job_description: jd || null }),
-      },
-    )
-    setChatReply(out.reply)
-    setProposed(out.proposed_edit)
+  async function runCoach(action: (typeof COACH_ACTIONS)[number]['id']) {
+    setCoaching(true)
+    try {
+      const out = await api<{ reply: string; proposed_edit: typeof proposed }>(
+        `/resumes/${id}/chat`,
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            action,
+            job_description: jd.slice(0, 4000) || null,
+          }),
+        },
+      )
+      setChatReply(out.reply)
+      setProposed(out.proposed_edit)
+      toast.push('Coach reply ready')
+    } catch (ex) {
+      toast.push(ex instanceof Error ? ex.message : 'Coach failed')
+    } finally {
+      setCoaching(false)
+    }
   }
 
   async function applyEdit() {
@@ -90,9 +127,26 @@ export function ResumeEditor() {
       body: JSON.stringify({ section: proposed.section, after: proposed.after }),
     })
     setResume(r)
-    setLatex(r.latex_body || proposed.after)
+    if (r.track === 'latex') setLatex(r.latex_body || proposed.after)
+    else setStructured(fromApi(r.structured_json as Record<string, unknown>))
     setProposed(null)
+    setDirty(false)
     setStatus('Edit applied — re-score manually when ready')
+    toast.push('Edit applied')
+  }
+
+  async function remove() {
+    if (!resume || !confirm(`Delete “${resume.title}”?`)) return
+    await api(`/resumes/${id}`, { method: 'DELETE' })
+    toast.push('Deleted')
+    nav('/')
+  }
+
+  function copyScore() {
+    const n = job?.result_json?.overall_score
+    if (n == null) return
+    void navigator.clipboard.writeText(String(n))
+    toast.push('Score copied')
   }
 
   if (!resume) {
@@ -105,22 +159,24 @@ export function ResumeEditor() {
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <Link
-            to="/"
-            className="text-sm text-[var(--color-muted)] transition-colors hover:text-white"
-          >
+        <div className="min-w-0 flex-1">
+          <Link to="/" className="text-sm text-[var(--color-muted)] hover:text-[var(--color-text)]">
             ← Resumes
           </Link>
           <div className="mt-2 flex flex-wrap items-center gap-2">
-            <h1 className="font-display text-2xl font-semibold tracking-tight sm:text-3xl">
-              {resume.title}
-            </h1>
+            <input
+              className="input max-w-md font-display text-xl font-semibold tracking-tight sm:text-2xl py-1.5"
+              value={title}
+              onChange={(e) => {
+                setTitle(e.target.value)
+                setDirty(true)
+              }}
+              aria-label="Resume title"
+            />
             <span className="chip">{resume.track}</span>
+            {dirty && <span className="text-xs text-[var(--color-warn)]">Unsaved</span>}
           </div>
-          <p className="mt-1 font-mono text-xs text-[var(--color-muted)]">
-            {resume.id.slice(0, 13)}…
-          </p>
+          <p className="mt-1 font-mono text-xs text-[var(--color-muted)]">{resume.id.slice(0, 13)}…</p>
         </div>
         <div className="flex flex-wrap gap-2">
           <button type="button" onClick={() => void save()} className="btn btn-secondary">
@@ -129,13 +185,11 @@ export function ResumeEditor() {
           <button type="button" onClick={() => void compile()} className="btn btn-secondary">
             Compile
           </button>
-          <button
-            type="button"
-            onClick={() => void score()}
-            className="btn btn-primary"
-            disabled={scoring}
-          >
+          <button type="button" onClick={() => void score()} className="btn btn-primary" disabled={scoring}>
             {scoring ? 'Scoring…' : 'Re-check score'}
+          </button>
+          <button type="button" onClick={() => void remove()} className="btn btn-danger">
+            Delete
           </button>
         </div>
       </div>
@@ -147,45 +201,49 @@ export function ResumeEditor() {
       )}
 
       <div className="grid gap-5 lg:grid-cols-12">
-        {/* Editor ~58% */}
         <section className="card flex flex-col p-4 lg:col-span-7">
           <div className="mb-3 flex items-center justify-between">
-            <h2 className="font-display text-sm font-semibold tracking-wide text-slate-200">
-              {resume.track === 'latex' ? 'LaTeX editor' : 'Structured JSON'}
+            <h2 className="font-display text-sm font-semibold tracking-wide">
+              {resume.track === 'latex' ? 'LaTeX editor' : 'Structured form'}
             </h2>
-            <span className="text-xs text-[var(--color-muted)]">JetBrains Mono</span>
           </div>
           {resume.track === 'latex' ? (
             <textarea
               className="input min-h-[28rem] flex-1 resize-y font-mono text-[13px] leading-relaxed"
               value={latex}
-              onChange={(e) => setLatex(e.target.value)}
+              onChange={(e) => {
+                setLatex(e.target.value)
+                setDirty(true)
+              }}
               spellCheck={false}
             />
           ) : (
-            <textarea
-              className="input min-h-[28rem] flex-1 resize-y font-mono text-[13px] leading-relaxed"
-              value={structuredText}
-              onChange={(e) => setStructuredText(e.target.value)}
-              spellCheck={false}
+            <StructuredForm
+              value={structured}
+              onChange={(v) => {
+                setStructured(v)
+                setDirty(true)
+              }}
             />
           )}
         </section>
 
-        {/* Score + coach ~42% */}
         <div className="flex flex-col gap-5 lg:col-span-5">
           <section className="card p-4">
-            <h2 className="font-display text-sm font-semibold tracking-wide text-slate-200">
-              ATS score
-            </h2>
+            <div className="flex items-center justify-between gap-2">
+              <h2 className="font-display text-sm font-semibold tracking-wide">ATS score</h2>
+              {overall != null && job?.status === 'complete' && (
+                <button type="button" className="btn btn-secondary text-xs py-1" onClick={copyScore}>
+                  Copy
+                </button>
+              )}
+            </div>
             {job ? (
               <div className="mt-3 space-y-4">
                 <ProgressStepper status={job.status} />
                 {job.status === 'processing' || job.status === 'queued' ? (
                   <div className="rounded-lg border border-[var(--color-line)] bg-[var(--color-panel-2)] px-4 py-6 text-center">
-                    <p className="font-display text-3xl font-semibold text-[var(--color-muted)]">
-                      …
-                    </p>
+                    <p className="font-display text-3xl font-semibold text-[var(--color-muted)]">…</p>
                     <p className="mt-1 text-sm text-[var(--color-soft)]">Scoring in progress</p>
                   </div>
                 ) : job.result_json ? (
@@ -203,10 +261,10 @@ export function ResumeEditor() {
                           className="rounded-lg border border-[var(--color-line)] bg-[var(--color-panel-2)] p-3"
                         >
                           <div className="flex items-center justify-between gap-2 text-sm">
-                            <span className="font-medium text-slate-200">{c.name}</span>
+                            <span className="font-medium">{c.name}</span>
                             <span className="tabular-nums text-[var(--color-soft)]">{c.score}</span>
                           </div>
-                          <div className="mt-2 h-1 overflow-hidden rounded-full bg-slate-800">
+                          <div className="mt-2 h-1 overflow-hidden rounded-full bg-[var(--color-line)]">
                             <div
                               className="h-full rounded-full bg-[var(--color-accent)]"
                               style={{ width: `${Math.min(100, Math.max(0, c.score))}%` }}
@@ -222,57 +280,56 @@ export function ResumeEditor() {
                     </ul>
                   </>
                 ) : null}
-                {job.error && (
-                  <p className="text-sm text-[var(--color-danger)]">{job.error}</p>
-                )}
+                {job.error && <p className="text-sm text-[var(--color-danger)]">{job.error}</p>}
               </div>
             ) : (
               <p className="mt-3 text-sm text-[var(--color-muted)]">
-                Run <strong className="text-slate-300">Re-check score</strong> for async results
-                with evidence.
+                Run <strong>Re-check score</strong> for async results with evidence.
               </p>
             )}
           </section>
 
           <section className="card p-4">
-            <h2 className="font-display text-sm font-semibold tracking-wide text-slate-200">
-              JD-aware coach
-            </h2>
+            <h2 className="font-display text-sm font-semibold tracking-wide">JD-aware coach</h2>
+            <p className="mt-1 text-xs text-[var(--color-muted)]">
+              Fixed actions only — free-form chat is disabled to reduce prompt injection risk.
+            </p>
             <div className="mt-3 space-y-3">
               <div>
                 <label className="label" htmlFor="jd">
-                  Job description
+                  Job description (optional, max 4k)
                 </label>
                 <textarea
                   id="jd"
                   className="input h-24 resize-y text-sm"
-                  placeholder="Paste JD (optional)"
+                  placeholder="Paste JD for align-to-JD action"
+                  maxLength={4000}
                   value={jd}
                   onChange={(e) => setJd(e.target.value)}
                 />
+                <p className="mt-1 text-xs text-[var(--color-muted)]">{jd.length}/4000</p>
               </div>
-              <div>
-                <label className="label" htmlFor="msg">
-                  Message
-                </label>
-                <input
-                  id="msg"
-                  className="input text-sm"
-                  value={message}
-                  onChange={(e) => setMessage(e.target.value)}
-                />
+              <div className="flex flex-wrap gap-2">
+                {COACH_ACTIONS.map((a) => (
+                  <button
+                    key={a.id}
+                    type="button"
+                    className="btn btn-primary text-xs"
+                    disabled={coaching}
+                    onClick={() => void runCoach(a.id)}
+                  >
+                    {a.label}
+                  </button>
+                ))}
               </div>
-              <button type="button" onClick={() => void chat()} className="btn btn-primary">
-                Ask
-              </button>
               {chatReply && (
-                <p className="rounded-lg border border-[var(--color-line)] bg-[var(--color-panel-2)] p-3 text-sm leading-relaxed text-slate-300">
+                <p className="rounded-lg border border-[var(--color-line)] bg-[var(--color-panel-2)] p-3 text-sm leading-relaxed">
                   {chatReply}
                 </p>
               )}
               {proposed && (
-                <div className="rounded-xl border border-amber-700/60 bg-[rgba(245,158,11,0.06)] p-3 shadow-[0_0_0_1px_rgba(245,158,11,0.12)]">
-                  <p className="text-sm font-medium text-amber-300">
+                <div className="rounded-xl border border-amber-500/50 bg-amber-500/5 p-3">
+                  <p className="text-sm font-medium text-amber-700 dark:text-amber-300">
                     Proposed edit · <span className="font-mono text-xs">{proposed.section}</span>
                   </p>
                   <pre className="mt-2 max-h-36 overflow-auto whitespace-pre-wrap font-mono text-xs leading-relaxed text-[var(--color-soft)]">
@@ -282,11 +339,7 @@ export function ResumeEditor() {
                     <button type="button" onClick={() => void applyEdit()} className="btn btn-warn">
                       Approve & apply
                     </button>
-                    <button
-                      type="button"
-                      className="btn btn-secondary"
-                      onClick={() => setProposed(null)}
-                    >
+                    <button type="button" className="btn btn-secondary" onClick={() => setProposed(null)}>
                       Dismiss
                     </button>
                   </div>

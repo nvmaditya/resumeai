@@ -1,9 +1,11 @@
 import { useState, type FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { api, setToken } from '../api/client'
+import { useTheme } from '../theme'
 
 export function Login() {
   const nav = useNavigate()
+  const { theme, toggle } = useTheme()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [err, setErr] = useState('')
@@ -29,11 +31,14 @@ export function Login() {
 
   return (
     <div className="relative flex min-h-screen flex-col">
-      <div className="px-6 py-5">
+      <div className="flex items-center justify-between px-6 py-5">
         <span className="font-display text-lg font-semibold text-[var(--color-accent)]">ResumeAI</span>
+        <button type="button" className="btn btn-secondary text-xs py-1.5" onClick={toggle}>
+          {theme === 'light' ? 'Dark' : 'Light'}
+        </button>
       </div>
-      <div className="flex flex-1 items-start justify-center px-4 pb-16 pt-8 sm:pt-16">
-        <div className="card w-full max-w-[420px] p-8 shadow-[0_20px_60px_rgba(0,0,0,0.35)]">
+      <div className="flex flex-1 items-start justify-center px-4 pb-16 pt-8 sm:pt-12">
+        <div className="card w-full max-w-[420px] p-8">
           <h1 className="font-display text-2xl font-semibold tracking-tight">Welcome back</h1>
           <p className="mt-2 text-sm text-[var(--color-soft)]">
             Score, coach, and ship a stronger engineering resume.
@@ -45,6 +50,7 @@ export function Login() {
               </label>
               <input
                 id="email"
+                name="email"
                 className="input"
                 type="email"
                 autoComplete="email"
@@ -59,6 +65,7 @@ export function Login() {
               </label>
               <input
                 id="password"
+                name="password"
                 className="input"
                 type="password"
                 autoComplete="current-password"

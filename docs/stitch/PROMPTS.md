@@ -4,19 +4,33 @@ Use with **Desktop** device type. Apply design system after first screen if toke
 
 Project name: **ResumeAI**
 
+**Implemented in app (2026-07-22):** light default + dark toggle, structured form editor, fixed coach actions (no free chat), injection hardening.
+
 ---
 
 ## Prompt 0 — Design system (via create_design_system)
 
+### 0a Light (default product)
+
+Display name: `ResumeAI Light`
+
+- colorMode: LIGHT
+- customColor / primary: `#059669`
+- headlineFont: SPACE_GROTESK
+- bodyFont: INTER
+- roundness: ROUND_TWELVE
+- colorVariant: TONAL_SPOT
+- surfaces: page `#F4F6F8`, card `#FFFFFF`, border `#E2E8F0`, text `#0F172A`
+
+### 0b Dark
+
 Display name: `ResumeAI Dark`
 
-Theme intent:
 - colorMode: DARK
 - customColor / primary: `#10B981`
 - headlineFont: SPACE_GROTESK
 - bodyFont: INTER
 - roundness: ROUND_TWELVE
-- colorVariant: TONAL_SPOT
 
 designMd: contents of `docs/stitch/DESIGN.md`
 

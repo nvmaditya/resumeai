@@ -1,0 +1,155 @@
+\documentclass[11pt,letterpaper]{article}
+
+% Packages
+\usepackage[margin=0.3in]{geometry}
+\usepackage{hyperref}
+\usepackage{enumitem}
+\usepackage{titlesec}
+\usepackage{xcolor}
+\usepackage{graphicx}
+
+% Colors
+\definecolor{sectioncolor}{HTML}{333333}
+\definecolor{linkcolor}{HTML}{0057B8}
+
+% Hyperref setup
+\hypersetup{
+    colorlinks=true,
+    linkcolor=linkcolor,
+    urlcolor=linkcolor
+}
+
+% Section formatting
+\titleformat{\section}
+  {\normalfont\Large\bfseries\color{sectioncolor}}
+  {}{0em}{}[\titlerule]
+\titlespacing*{\section}{0pt}{2pt}{5pt}
+
+\setlength{\parindent}{0pt}
+
+\newcommand{\resumeSubheading}[4]{
+  \vspace{-2pt}
+  \item
+    \begin{tabular*}{0.97\textwidth}[t]{l@{\extracolsep{\fill}}r}
+      \textbf{#1} & \textbf{#2} \\
+      #3 & #4 \\
+    \end{tabular*}\vspace{-5pt}
+}
+
+\newcommand{\skill}[2]{
+  \textbf{#1:} #2 \\
+}
+
+\begin{document}
+
+% Header
+\noindent
+\begin{minipage}[c]{0.75\textwidth}
+    {\huge \textbf{Aditya Khandelwal}} \\[4pt]
+    Jaipur, Rajasthan $\cdot$ +91 9828460280 \\[2pt]
+    \href{mailto:adityakhandelwal0271@gmail.com}{Email} $\cdot$
+    \href{https://www.linkedin.com/in/nvmaditya/}{LinkedIn} $\cdot$
+    \href{https://github.com/nvmaditya}{GitHub} $\cdot$
+    \href{https://theadityakhandelwal.in/}{Portfolio}
+\end{minipage}%
+
+\vspace{2.5pt}
+
+\section{PROFESSIONAL SUMMARY}
+Execution-first CS undergraduate who builds working AI-powered systems end-to-end across any tech stack. Across 3 internships, built LLM extraction pipelines at Sentient Scripts, researched time series forecasting at Samsung R\&D, and developed real-time CV systems at Infosys. Independently built multi-agent (PromptGraph) and full-stack RAG (VectorLearn) systems. Uses AI as leverage to move fast and deliver outcomes.
+
+\section{TECHNICAL SKILLS}
+\skill{Languages}{Python, JavaScript, TypeScript, SQL}
+\skill{AI / ML}{LangGraph, LangChain, OpenAI API, Groq API, Gemini API, RAG, FAISS, PyTorch, YOLOv8, OpenCV}
+\skill{Backend}{FastAPI, REST APIs, SSE Streaming, Pydantic, asyncio, Microservices}
+\skill{Full-Stack}{Next.js, React.js, Vite, Express.js}
+\skill{Databases \& DevOps}{PostgreSQL, MySQL, SQLite, FAISS, Git, Docker, CI/CD, Linux}
+
+\section{PROFESSIONAL EXPERIENCE}
+\begin{itemize}[leftmargin=*]
+
+\resumeSubheading
+{AI Engineer Intern}{Aug 2025 -- Mar 2026}
+{Sentient Scripts, Discovery Lab SRMIST}{}
+\begin{itemize}[leftmargin=*]
+    \item Built multi-source data aggregation pipelines in Python that ingested, normalized, and consolidated intelligence from 5+ external feeds for real-time monitoring and trend tracking.
+    \item Developed an LLM-based extraction module that transformed unstructured text into structured domain-specific metadata, reducing manual extraction time by over 70\% and enabling automated cross-dataset correlation.
+    \item Designed an end-to-end intelligence pipeline integrating scheduled data collection, LLM-driven correlation with Pydantic-validated output, and automated report generation, cutting turnaround from hours to minutes.
+\end{itemize}
+
+\resumeSubheading
+{Research Intern}{Apr 2025 -- Jan 2026}
+{Samsung R\&D Institute India Bangalore (Remote)}{}
+\begin{itemize}[leftmargin=*]
+    \item Benchmarked the TOTEM time series forecasting model with PyTorch across 4+ datasets and multiple forecasting horizons, producing comparative accuracy analyses against baseline transformer architectures.
+    \item Identified tokenization and architecture design trade-offs that impacted long-horizon generalization, contributing findings to the team's ongoing model evaluation process.
+\end{itemize}
+
+\resumeSubheading
+{Python Developer Intern}{Nov 2025 -- Jan 2026}
+{Infosys Springboard (Remote)}{}
+\begin{itemize}[leftmargin=*]
+    \item Built a multi-zone real-time crowd counting system using YOLOv8 and OpenCV with Python multiprocessing to concurrently handle 4+ video streams, achieving measurable per-frame latency reduction.
+    \item Designed a centralized monitoring dashboard with automated threshold-based alerting, eliminating manual stream supervision and reducing incident response time across all monitored zones.
+\end{itemize}
+
+\end{itemize}
+
+\section{TECHNICAL PROJECTS}
+\begin{itemize}[leftmargin=*]
+
+\item
+\begin{tabular*}{0.97\textwidth}{l@{\extracolsep{\fill}}r}
+  \textbf{PromptGraph - Multi-Agent Prompt Architecture Generator \href{https://github.com/nvmaditya/PromptGraph}{[GitHub]}} & \\
+  \textit{\small Tech Stack: Python, LangGraph, Groq API, Pydantic, FastAPI} & \\
+\end{tabular*}\vspace{-5pt}
+\begin{itemize}[leftmargin=*]
+    \item Architected a 6-agent LangGraph StateGraph pipeline that converts natural language project ideas into structured prompt architectures and production-ready Python scaffolding in a single run.
+    \item Implemented a 3-layer fault-tolerance system (Tenacity exponential backoff, rate limiting, schema self-healing) that reduced token consumption by $\sim$59\% via compact schema representation.
+    \item Built a Critic-Refiner quality loop evaluating prompts across 5 dimensions; validated with a 190-test suite covering unit, integration, and live API regression.
+\end{itemize}
+
+\item
+\begin{tabular*}{0.97\textwidth}{l@{\extracolsep{\fill}}r}
+  \textbf{VectorLearn - Document Intelligence Platform \href{https://github.com/nvmaditya}{[GitHub]}} & \\
+  \textit{\small Tech Stack: Python, FastAPI, React, Vite, TailwindCSS, FAISS, SQLite, Ollama, RAG} & \\
+\end{tabular*}\vspace{-5pt}
+\begin{itemize}[leftmargin=*]
+    \item Built a full-stack AI tutoring platform with a RAG pipeline supporting multi-user document upload, isolated FAISS vector stores per user, and an SSE-streaming chat interface returning source-cited answers.
+    \item Engineered a modular \texttt{docpipe} ingestion pipeline handling PDF extraction, recursive chunking, \texttt{bge-large} embeddings via Ollama, and per-user FAISS+SQLite indexing for accurate semantic retrieval.
+\end{itemize}
+
+\item
+\begin{tabular*}{0.97\textwidth}{l@{\extracolsep{\fill}}r}
+  \textbf{AI PPT Generator - Real-Time Presentation Deck Builder \href{https://github.com/nvmaditya}{[GitHub]}} & \\
+  \textit{\small Tech Stack: Python, FastAPI, Groq API, Vite, JavaScript, SSE, pptxgenjs} & \\
+\end{tabular*}\vspace{-5pt}
+\begin{itemize}[leftmargin=*]
+    \item Built a prompt-to-deck system powered by Groq API that streams slide content progressively via SSE with in-browser editing and reordering, cutting deck creation time to under 60 seconds.
+    \item Designed a FastAPI backend with typed SSE event contracts (title/slide/done/error) and a Node.js \texttt{pptxgenjs} export script; supported configurable tone, slide count (5-20), and multi-language output.
+\end{itemize}
+
+\end{itemize}
+
+\section{HACKATHONS \& ACHIEVEMENTS}
+\begin{itemize}[leftmargin=*]
+\item
+\begin{tabular*}{0.97\textwidth}{l@{\extracolsep{\fill}}r}
+  \textbf{Code Zero Hackathon - 2nd Place} & \textit{National Level} \\
+\end{tabular*}\vspace{-5pt}
+\begin{itemize}[leftmargin=*]
+    \item Outperformed teams nationwide by designing and building a functional AI prototype under strict time constraints, demonstrating execution speed and problem-solving under pressure.
+\end{itemize}
+\end{itemize}
+
+\section{EDUCATION}
+\begin{itemize}[leftmargin=*]
+\resumeSubheading
+{SRM Institute of Science and Technology}{2023 -- 2027}
+{B.Tech in Computer Science and Engineering}{CGPA: 8.91 / 10}
+\resumeSubheading
+{BVB Vidyashram}{}
+{Senior Secondary (Class XII)}{82.80\%}
+\end{itemize}
+
+\end{document}
