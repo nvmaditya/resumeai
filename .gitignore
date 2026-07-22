@@ -17,3 +17,5 @@ resume/
 backend/bin/tectonic.exe
 backend/bin/tectonic
 !backend/bin/README.md
+
+backend/cache/
