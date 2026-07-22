@@ -42,7 +42,6 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   } | null>(null)
   const wiping = wipe !== null
   const busy = useRef(false)
-  const pendingTheme = useRef<Theme | null>(null)
   const safetyTimer = useRef<number | null>(null)
 
   useEffect(() => {
@@ -55,11 +54,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
       window.clearTimeout(safetyTimer.current)
       safetyTimer.current = null
     }
-    const next = pendingTheme.current
-    if (!next && !busy.current) return
-    pendingTheme.current = null
     setWipe(null)
-    if (next) setTheme(next)
     busy.current = false
   }, [])
 
@@ -68,17 +63,14 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     const prev = theme
     const next: Theme = theme === 'light' ? 'dark' : 'light'
 
+    // Instant: button label + data-theme (via useEffect)
+    setTheme(next)
+
     if (prefersReducedMotion()) {
-      setTheme(next)
       return
     }
 
     busy.current = true
-    pendingTheme.current = next
-    // CSS under cover only — no React/CodeMirror work mid-wipe
-    apply(next)
-    localStorage.setItem('theme', next)
-
     setWipe({ bg: INK[prev], out: false })
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
