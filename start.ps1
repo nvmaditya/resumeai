@@ -13,8 +13,11 @@ $backendScript = @'
 Set-Location '__ROOT__\backend'
 $env:PYTHONPATH = (Get-Location).Path
 if (-not $env:JWT_SECRET) { $env:JWT_SECRET = 'dev-only-change-me' }
-if (-not $env:DATA_DIR) { $env:DATA_DIR = './data' }
-if (-not $env:DATABASE_URL) { $env:DATABASE_URL = 'sqlite:///./data/app.db' }
+if (-not $env:DATA_DIR) { $env:DATA_DIR = (Join-Path (Get-Location) 'data') }
+if (-not $env:DATABASE_URL) {
+  $db = (Join-Path (Get-Location) 'data\app.db') -replace '\\', '/'
+  $env:DATABASE_URL = "sqlite:///$db"
+}
 if (-not $env:CORS_ORIGINS) { $env:CORS_ORIGINS = 'http://localhost:5173' }
 if (-not $env:SCORE_BACKEND) { $env:SCORE_BACKEND = 'hiring_agent' }
 if (-not $env:COACH_BACKEND) { $env:COACH_BACKEND = 'ollama' }

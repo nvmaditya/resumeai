@@ -5,14 +5,16 @@ class LocalObjectStore:
     """Local filesystem ObjectStore. SaaS: swap for S3-compatible impl."""
 
     def __init__(self, root: str | Path) -> None:
-        self.root = Path(root)
+        # Resolve once so later os.chdir() cannot redirect storage
+        self.root = Path(root).resolve()
         self.root.mkdir(parents=True, exist_ok=True)
 
     def _path(self, key: str) -> Path:
         # prevent path traversal
         safe = Path(key.replace("\\", "/").lstrip("/"))
         full = (self.root / safe).resolve()
-        if not str(full).startswith(str(self.root.resolve())):
+        root_s = str(self.root)
+        if not str(full).startswith(root_s):
             raise ValueError("invalid object key")
         return full
 

@@ -158,10 +158,8 @@ def delete_resume(
 def _work_dir(data_dir: str, user_id: str, resume_id: str):
     from pathlib import Path
 
-    # Always absolute so tectonic cwd + relative main.tex are unambiguous
-    base = Path(data_dir)
-    if not base.is_absolute():
-        base = (Path.cwd() / base).resolve()
+    # data_dir must already be absolute (get_settings freezes it). Never use CWD.
+    base = Path(data_dir).resolve()
     p = (base / "users" / user_id / "resumes" / resume_id / "work").resolve()
     p.mkdir(parents=True, exist_ok=True)
     return p

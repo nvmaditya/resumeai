@@ -20,13 +20,17 @@ from app.storage.local import LocalObjectStore
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    get_settings.cache_clear()
     settings = get_settings()
-    Path(settings.data_dir).mkdir(parents=True, exist_ok=True)
+    data_root = Path(settings.data_dir).resolve()
+    data_root.mkdir(parents=True, exist_ok=True)
+    settings.data_dir = str(data_root)
     # Ensure sqlite parent exists for default URL
-    if settings.database_url.startswith("sqlite:///./"):
-        Path(settings.data_dir).mkdir(parents=True, exist_ok=True)
+    if "sqlite" in settings.database_url:
+        data_root.mkdir(parents=True, exist_ok=True)
     init_db()
-    app.state.store = LocalObjectStore(settings.data_dir)
+    app.state.store = LocalObjectStore(data_root)
+    app.state.data_dir = str(data_root)
     app.state.job_runner = LocalJobRunner()
     app.state.score_engine = build_score_engine(settings)
     app.state.compiler = build_compiler(settings.tectonic_path or None)

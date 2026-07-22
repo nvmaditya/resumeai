@@ -28,4 +28,11 @@ class Settings(BaseSettings):
 
 @lru_cache
 def get_settings() -> Settings:
-    return Settings()
+    s = Settings()
+    # Freeze data_dir to absolute path at first load (process CWD must not matter later)
+    p = Path(s.data_dir)
+    if not p.is_absolute():
+        s.data_dir = str((Path.cwd() / p).resolve())
+    else:
+        s.data_dir = str(p.resolve())
+    return s

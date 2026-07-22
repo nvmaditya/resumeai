@@ -115,13 +115,11 @@ class HiringAgentScoreEngine:
         self.vendor_path = Path(vendor_path)
 
     def run(self, snapshot: dict[str, Any], job_id: str) -> dict[str, Any]:
-        import os
-        from contextlib import contextmanager
-
         t0 = time.perf_counter()
-        vendor = str(self.vendor_path.resolve())
-        if vendor not in sys.path:
-            sys.path.insert(0, vendor)
+        vendor = Path(self.vendor_path).resolve()
+        vendor_s = str(vendor)
+        if vendor_s not in sys.path:
+            sys.path.insert(0, vendor_s)
 
         structured = snapshot.get("structured_json")
         latex = snapshot.get("latex_body") or ""
@@ -129,62 +127,65 @@ class HiringAgentScoreEngine:
         github_data: dict[str, Any] = {}
         github_enriched = False
 
-        @contextmanager
-        def _vendor_cwd():
-            # hiring-agent TemplateManager loads prompts/templates relative to CWD
-            prev = os.getcwd()
-            os.chdir(vendor)
-            try:
-                yield
-            finally:
-                os.chdir(prev)
-
         try:
-            with _vendor_cwd():
-                if github_url:
-                    try:
-                        from github import fetch_and_display_github_info  # type: ignore
+            # Do NOT os.chdir — that races with compile paths (process-global CWD).
+            # Point TemplateManager at absolute templates instead.
+            from prompts import template_manager as tm  # type: ignore
 
-                        github_data = fetch_and_display_github_info(github_url) or {}
-                        github_enriched = bool(
-                            github_data.get("profile") or github_data.get("projects")
-                        )
-                    except Exception as exc:
-                        github_data = {"error": str(exc)}
+            abs_templates = str(vendor / "prompts" / "templates")
+            _orig = tm.TemplateManager.__init__
 
-                from evaluator import ResumeEvaluator  # type: ignore
-                from prompt import DEFAULT_MODEL, MODEL_PARAMETERS  # type: ignore
-                from transform import (  # type: ignore
-                    convert_github_data_to_text,
-                    convert_json_resume_to_text,
-                )
+            def _init(self, template_dir: str = "prompts/templates") -> None:  # type: ignore[no-untyped-def]
+                if not Path(template_dir).is_absolute():
+                    template_dir = abs_templates
+                _orig(self, template_dir)
 
-                if structured:
-                    try:
-                        from models import JSONResume  # type: ignore
+            tm.TemplateManager.__init__ = _init  # type: ignore[method-assign]
 
-                        resume = JSONResume(**structured)
-                        resume_text = convert_json_resume_to_text(resume)
-                    except Exception:
-                        resume_text = text
-                else:
+            if github_url:
+                try:
+                    from github import fetch_and_display_github_info  # type: ignore
+
+                    github_data = fetch_and_display_github_info(github_url) or {}
+                    github_enriched = bool(
+                        github_data.get("profile") or github_data.get("projects")
+                    )
+                except Exception as exc:
+                    github_data = {"error": str(exc)}
+
+            from evaluator import ResumeEvaluator  # type: ignore
+            from prompt import DEFAULT_MODEL, MODEL_PARAMETERS  # type: ignore
+            from transform import (  # type: ignore
+                convert_github_data_to_text,
+                convert_json_resume_to_text,
+            )
+
+            if structured:
+                try:
+                    from models import JSONResume  # type: ignore
+
+                    resume = JSONResume(**structured)
+                    resume_text = convert_json_resume_to_text(resume)
+                except Exception:
                     resume_text = text
+            else:
+                resume_text = text
 
-                if github_enriched:
-                    resume_text = resume_text + "\n\n" + convert_github_data_to_text(github_data)
+            if github_enriched:
+                resume_text = resume_text + "\n\n" + convert_github_data_to_text(github_data)
 
-                if not resume_text.strip():
-                    raise ValueError("empty resume text for evaluation")
+            if not resume_text.strip():
+                raise ValueError("empty resume text for evaluation")
 
-                params = MODEL_PARAMETERS.get(DEFAULT_MODEL, {"temperature": 0.5, "top_p": 0.9})
-                evaluator = ResumeEvaluator(model_name=DEFAULT_MODEL, model_params=params)
-                evaluation = evaluator.evaluate_resume(resume_text)
-                result = _map_evaluation(evaluation, job_id)
-                result["engine"] = "hiring_agent"
-                result["github_enriched"] = github_enriched
-                result["github_url"] = github_url
-                result["duration_ms"] = int((time.perf_counter() - t0) * 1000)
-                return result
+            params = MODEL_PARAMETERS.get(DEFAULT_MODEL, {"temperature": 0.5, "top_p": 0.9})
+            evaluator = ResumeEvaluator(model_name=DEFAULT_MODEL, model_params=params)
+            evaluation = evaluator.evaluate_resume(resume_text)
+            result = _map_evaluation(evaluation, job_id)
+            result["engine"] = "hiring_agent"
+            result["github_enriched"] = github_enriched
+            result["github_url"] = github_url
+            result["duration_ms"] = int((time.perf_counter() - t0) * 1000)
+            return result
         except Exception as exc:
             ms = int((time.perf_counter() - t0) * 1000)
             return {
