@@ -47,7 +47,7 @@ def main() -> int:
     engine = result.get("engine")
     pdf_bytes = result.get("pdf_bytes") or b""
     msg = result.get("message") or ""
-    print(f"compile: engine={engine} bytes={result.get('bytes')} synctex={result.get('synctex')}")
+    print(f"compile: engine={engine} bytes={result.get('bytes')}")
     print(f"message: {msg[:200]}")
 
     if not pdf_bytes.startswith(b"%PDF"):

@@ -66,7 +66,9 @@ npm run dev
 
 Open `http://localhost:5173` — register → create resume → score → chat → apply edit → re-score.
 
-Workspace (desktop): **1/5** actions · **2/5** editor · **2/5** PDF preview.
+Workspace (desktop): **1/5** actions · **2/5** editor · **2/5** PDF (browser-native iframe preview).
+
+Coach proposes **find/replace hunks** (no invented facts); Accept applies them and recompiles. Coach backends: `ollama` | `openrouter` | `groq` | `stub`.
 
 ## Tectonic (Overleaf-like PDFs)
 

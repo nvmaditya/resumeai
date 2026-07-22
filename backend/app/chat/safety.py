@@ -14,17 +14,29 @@ CoachAction = Literal[
 ]
 
 COACH_ACTIONS: dict[str, str] = {
-    "improve_score": "Give the top 3 score-grounded improvements with evidence references.",
-    "strengthen_projects": "Propose stronger project bullets with metrics; keep claims resume-grounded.",
-    "align_jd": "Map resume gaps to the provided job description keywords only.",
-    "quantify_impact": "Rewrite one summary or project line to include quantified impact.",
+    "improve_score": (
+        "Using SCORE_JSON evidence and the hiring-agent rubric, propose 1-3 find/replace hunks "
+        "that rephrase EXISTING resume content for clearer impact/complexity/links already present. "
+        "Do not invent facts. Put real-world gaps (true OSS, new demos) only in reply."
+    ),
+    "strengthen_projects": (
+        "Propose find/replace hunks that strengthen project wording using only claims already in "
+        "the resume (complexity, stack, ownership). Never invent metrics or links."
+    ),
+    "align_jd": (
+        "Using JD keywords that already match resume evidence, propose hunks that surface those "
+        "keywords where truthful. Never invent skills for JD keywords not supported by the resume."
+    ),
+    "quantify_impact": (
+        "If the resume already states numbers, rewrite one line via a hunk for clearer impact. "
+        "If no numbers exist, explain in reply only — do not invent metrics."
+    ),
 }
 
 MAX_JD_CHARS = 4000
 MAX_RESUME_CHARS = 50_000
 MAX_EDIT_CHARS = 100_000
 
-# Common injection markers — strip or reject segments (defense in depth).
 _INJECTION_RE = re.compile(
     r"(?is)(?:ignore\s+(?:all\s+)?(?:previous|prior|above)\s+instructions|"
     r"system\s*prompt|you\s+are\s+now|<\s*/?\s*system\s*>|"
@@ -44,7 +56,6 @@ def sanitize_text(value: str | None, *, max_len: int, field: str) -> str:
     text = value.replace("\x00", "").strip()
     if len(text) > max_len:
         text = text[:max_len]
-    # Neutralize injection-like phrases by replacing with marker (keep readability)
     text = _INJECTION_RE.sub("[filtered]", text)
     return text
 

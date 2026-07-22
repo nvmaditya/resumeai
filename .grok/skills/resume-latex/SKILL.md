@@ -24,59 +24,50 @@ Desktop: **1/5** actions/score/coach · **2/5** editor · **2/5** PDF preview.
 - Track **latex**: compile user `.tex` **as-is** (full TeX fidelity).
 - Track **structured**: generate minimal article `.tex` then tectonic.
 - Output stored as object key `users/{uid}/resumes/{rid}/out.pdf`.
-- Preview: blob from `GET /api/v1/resumes/{id}/pdf?inline=1`.
-- Download: same path without `inline` (attachment).
-- Reject PDFs `<200` bytes or non-`%PDF` (old stubs) → recompile.
+- Preview: browser-native PDF via blob URL + `<iframe>` (no pdf.js, no SyncTeX).
+- Download: `GET /api/v1/resumes/{id}/pdf` attachment.
+- Reject PDFs `<200` bytes or non-`%PDF` → recompile.
+
+## Coach: score-aware find/replace hunks
+
+- Fixed actions only: `improve_score`, `strengthen_projects`, `align_jd`, `quantify_impact`.
+- Response: `{ reply, proposed_edit: { section, hunks: [{find, replace}] } }`.
+- Apply: `POST .../apply-edit` with `hunks` — each `find` must be **unique** in the doc.
+- **Never invent** employers, metrics, links, OSS, titles. Real-world gaps → `reply` only.
+- Prompts include hiring-agent rubric (open_source / self_projects / production / technical_skills + link penalties).
+- Providers: `COACH_BACKEND=ollama|openrouter|groq|stub` (+ keys for openrouter/groq).
+
+### Hiring-agent score levers (for coaching)
+
+| Category | Max | Coach can improve by… | Cannot invent |
+|----------|-----|------------------------|---------------|
+| open_source | 35 | clearer wording of real multi-repo work | fake GSoC / external contribs |
+| self_projects | 30 | complexity wording; surface existing demo/GitHub URLs | fake users, stars, demos |
+| production | 25 | ownership language already true in work bullets | fake jobs |
+| technical_skills | 10 | skills already evidenced in body | skill stuffing |
 
 ## When editing LaTeX (agent rules)
 
-1. Prefer valid, self-contained docs: `\documentclass` … `\begin{document}` … `\end{document}`.
-2. Prefer packages tectonic can fetch (geometry, enumitem, hyperref, fontenc, lmodern). Avoid exotic Overleaf-only fonts unless needed.
-3. Keep margins via `geometry` (e.g. `margin=0.75in`) rather than inventing layout-engine paddings.
+1. Full docs: `\documentclass` … `\begin{document}` … `\end{document}`.
+2. Prefer tectonic-friendly packages: geometry, enumitem, hyperref, fontenc, lmodern.
+3. Margins via `geometry` (e.g. `margin=0.75in`).
 4. Never invent absolute Windows paths inside `.tex`.
-5. AI coach edits: **fixed actions only** (`improve_score`, `strengthen_projects`, `align_jd`, `quantify_impact`). No free-form user prompt injection.
-6. Proposed edits must return full replaceable body for section `latex` or `summary`.
-7. After LaTeX changes: recompile with tectonic; verify `engine=tectonic` and PDF size > 1KB.
+5. After hunk apply: recompile; verify `engine=tectonic` and PDF size > 1KB.
+6. Visual quality: consistent sectioning, tight lists (`enumitem` nosep), hyperref for real links only.
 
 ## Scoring
 
-- Default `SCORE_BACKEND=hiring_agent` (not stub). Stub is instant fake scores.
-- Pipeline: resume text → GitHub URL extract → `github.fetch_and_display_github_info` → LLM evaluate.
-- Health must show `score_backend: hiring_agent` for real scoring.
+- Default `SCORE_BACKEND=hiring_agent`. Stub is fake scores.
+- Pipeline: resume text → GitHub URL → vendor evaluator LLM.
 
-## Coach + Ollama
-
-- `COACH_BACKEND=ollama` (default), model `gemma3:4b` unless `OLLAMA_MODEL` set.
-- Untrusted resume/JD always fenced (`<<<UNTRUSTED_*>>>`); strip injection phrases.
-- Apply-edit rejects LaTeX that drops `\documentclass` / `\begin{document}` / `\end{document}`.
-- If Ollama down: surface error in reply; do not crash the API.
-
-## Editor / PDF UX
-
-- CodeMirror LaTeX highlighting (not plain textarea).
-- pdf.js canvas preview (not browser `<iframe>` PDF chrome).
-- **SyncTeX** (official `synctex` CLI — do not hand-parse `.synctex.gz`):
-  - Compile injects `\synctex=1`; work dir keeps `main.tex` / `main.pdf` / `main.synctex.gz`
-  - Inverse: `POST .../synctex/edit` `{page,x,y}` → line/column (Ctrl+Click PDF)
-  - Forward: `POST .../synctex/view` `{line,column}` → page/x/y (Ctrl+Click editor or Jump to PDF)
-  - Requires `synctex` on PATH (MiKTeX/TeX Live)
-
-## Tests to run after LaTeX/coach changes
+## Tests / done gate
 
 ```powershell
-# Full done gate (required before claiming done — see AGENTS.md)
 backend\.venv\Scripts\python.exe scripts\verify_before_done.py
-
-# Targeted subset while iterating:
-cd backend
-$env:PYTHONPATH = (Get-Location).Path
-.\.venv\Scripts\python.exe -m pytest tests/test_tectonic.py tests/test_pdf_layout.py tests/test_chat_safety.py -v
-# live (needs ollama + API):
-.\.venv\Scripts\python.exe tests/live_check.py
 ```
 
 ## Do not
 
-- Re-tune Helvetica layout paddings to “look like Overleaf” instead of using tectonic.
-- Allow free-form chat messages from the client.
-- Commit `backend/bin/tectonic.exe`.
+- Re-add SyncTeX or pdf.js unless product asks.
+- Free-form chat from the client.
+- Commit `backend/bin/tectonic.exe` or API keys.

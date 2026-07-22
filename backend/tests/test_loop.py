@@ -103,15 +103,17 @@ def test_register_score_apply_edit(client: TestClient):
     assert chat.status_code == 200
     pe = chat.json()["proposed_edit"]
     assert pe is not None
+    assert pe.get("hunks"), pe
     assert "Ignore previous" not in chat.json()["reply"] or "[filtered]" in str(chat.json())
 
     applied = client.post(
         f"/api/v1/resumes/{rid}/apply-edit",
         headers=headers,
-        json={"section": "latex", "after": pe["after"]},
+        json={"section": pe.get("section") or "latex", "hunks": pe["hunks"]},
     )
-    assert applied.status_code == 200
-    assert pe["after"] in (applied.json().get("latex_body") or "")
+    assert applied.status_code == 200, applied.text
+    body = applied.json().get("latex_body") or ""
+    assert pe["hunks"][0]["replace"] in body
 
 
 def test_cross_user_404(client: TestClient):

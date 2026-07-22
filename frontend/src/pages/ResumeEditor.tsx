@@ -3,7 +3,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom'
 import { api, downloadFile, fetchPdfBytes, type Job, type Resume } from '../api/client'
 import { ProgressStepper } from '../components/ProgressStepper'
 import { LatexEditor, type LatexEditorHandle } from '../components/LatexEditor'
-import { PdfPreview, type PdfHighlight } from '../components/PdfPreview'
+import { PdfPreview } from '../components/PdfPreview'
 import {
   StructuredForm,
   fromApi,
@@ -19,6 +19,9 @@ const COACH_ACTIONS = [
   { id: 'quantify_impact', label: 'Quantify impact' },
 ] as const
 
+type EditHunk = { find: string; replace: string }
+type ProposedEdit = { section: string; before?: string; hunks: EditHunk[] }
+
 export function ResumeEditor() {
   const { id } = useParams()
   const nav = useNavigate()
@@ -31,11 +34,7 @@ export function ResumeEditor() {
   const [structured, setStructured] = useState<StructuredResume>(fromApi(null))
   const [jd, setJd] = useState('')
   const [chatReply, setChatReply] = useState('')
-  const [proposed, setProposed] = useState<{
-    section: string
-    before: string
-    after: string
-  } | null>(null)
+  const [proposed, setProposed] = useState<ProposedEdit | null>(null)
   const [job, setJob] = useState<Job | null>(null)
   const [status, setStatus] = useState('')
   const [scoring, setScoring] = useState(false)
@@ -45,8 +44,6 @@ export function ResumeEditor() {
   const [pdfData, setPdfData] = useState<ArrayBuffer | null>(null)
   const [previewBusy, setPreviewBusy] = useState(false)
   const [engine, setEngine] = useState('')
-  const [pdfHighlight, setPdfHighlight] = useState<PdfHighlight | null>(null)
-  const [synctexOn, setSynctexOn] = useState(false)
   const compilingRef = useRef(false)
 
   async function load() {
@@ -104,17 +101,13 @@ export function ResumeEditor() {
           message: string
           bytes?: number
           engine?: string
-          synctex?: boolean
         }>(`/resumes/${id}/compile`, { method: 'POST' })
         setEngine(out.engine || '')
-        setSynctexOn(Boolean(out.synctex))
         const bytes = await fetchPdfBytes(`/resumes/${id}/pdf?inline=1`)
         setPdfData(bytes)
         setHasPdf(true)
         setStatus(
-          `${out.message}${out.bytes ? ` · ${out.bytes} B` : ''}${out.engine ? ` · ${out.engine}` : ''}${
-            out.synctex ? ' · SyncTeX' : ''
-          }`,
+          `${out.message}${out.bytes ? ` · ${out.bytes} B` : ''}${out.engine ? ` · ${out.engine}` : ''}`,
         )
         if (!opts?.quiet) toast.push(out.engine === 'tectonic' ? 'TeX preview ready' : 'Preview ready')
       } catch (ex) {
@@ -178,7 +171,7 @@ export function ResumeEditor() {
   async function runCoach(action: (typeof COACH_ACTIONS)[number]['id']) {
     setCoaching(true)
     try {
-      const out = await api<{ reply: string; proposed_edit: typeof proposed }>(
+      const out = await api<{ reply: string; proposed_edit: ProposedEdit | null }>(
         `/resumes/${id}/chat`,
         {
           method: 'POST',
@@ -190,7 +183,7 @@ export function ResumeEditor() {
       )
       setChatReply(out.reply)
       setProposed(out.proposed_edit)
-      toast.push('Coach reply ready')
+      toast.push(out.proposed_edit?.hunks?.length ? 'Coach diffs ready' : 'Coach reply ready')
     } catch (ex) {
       toast.push(ex instanceof Error ? ex.message : 'Coach failed')
     } finally {
@@ -199,16 +192,16 @@ export function ResumeEditor() {
   }
 
   async function applyEdit() {
-    if (!proposed) return
+    if (!proposed?.hunks?.length) return
     const prev = latex
     setLatexBackup(prev)
     try {
       const r = await api<Resume>(`/resumes/${id}/apply-edit`, {
         method: 'POST',
-        body: JSON.stringify({ section: proposed.section, after: proposed.after }),
+        body: JSON.stringify({ section: proposed.section, hunks: proposed.hunks }),
       })
       setResume(r)
-      if (r.track === 'latex') setLatex(r.latex_body || proposed.after)
+      if (r.track === 'latex') setLatex(r.latex_body || prev)
       else setStructured(fromApi(r.structured_json as Record<string, unknown>))
       setProposed(null)
       setDirty(false)
@@ -225,7 +218,7 @@ export function ResumeEditor() {
         })
       }
     } catch (ex) {
-      toast.push(ex instanceof Error ? ex.message : 'Apply rejected (structure?)')
+      toast.push(ex instanceof Error ? ex.message : 'Apply rejected')
     }
   }
 
@@ -234,44 +227,6 @@ export function ResumeEditor() {
     await api(`/resumes/${id}`, { method: 'DELETE' })
     toast.push('Deleted')
     nav('/')
-  }
-
-  async function onPdfCtrlClick(pos: { page: number; x: number; y: number }) {
-    try {
-      const hit = await api<{ line: number; column: number; input?: string }>(
-        `/resumes/${id}/synctex/edit`,
-        {
-          method: 'POST',
-          body: JSON.stringify({ page: pos.page, x: pos.x, y: pos.y }),
-        },
-      )
-      latexRef.current?.goToLine(hit.line, hit.column >= 0 ? hit.column : 0)
-      toast.push(`SyncTeX → L${hit.line}`)
-    } catch (ex) {
-      toast.push(ex instanceof Error ? ex.message : 'SyncTeX inverse failed — recompile')
-    }
-  }
-
-  async function forwardSearch(line: number, column: number) {
-    try {
-      const hit = await api<{ page: number; x: number; y: number; width?: number; height?: number }>(
-        `/resumes/${id}/synctex/view`,
-        {
-          method: 'POST',
-          body: JSON.stringify({ line, column }),
-        },
-      )
-      setPdfHighlight({
-        page: hit.page,
-        x: hit.x,
-        y: hit.y,
-        width: hit.width,
-        height: hit.height,
-      })
-      toast.push(`SyncTeX → PDF p.${hit.page}`)
-    } catch (ex) {
-      toast.push(ex instanceof Error ? ex.message : 'SyncTeX forward failed — recompile')
-    }
   }
 
   if (!resume) {
@@ -302,23 +257,10 @@ export function ResumeEditor() {
         />
         <span className="chip">{resume.track}</span>
         {engine && <span className="chip">{engine}</span>}
-        {synctexOn && <span className="chip">SyncTeX</span>}
         {dirty && <span className="text-xs text-amber-600">Unsaved</span>}
-        <button
-          type="button"
-          className="btn btn-secondary py-0.5 text-[10px]"
-          title="Forward search (editor cursor → PDF)"
-          onClick={() => {
-            const c = latexRef.current?.getCursor()
-            if (c) void forwardSearch(c.line, c.column)
-          }}
-        >
-          Jump to PDF
-        </button>
       </div>
 
       <div className="grid min-h-0 flex-1 grid-cols-1 gap-1.5 xl:grid-cols-5">
-        {/* 1/5 options */}
         <aside className="flex min-h-0 flex-col gap-1.5 overflow-y-auto rounded border border-[var(--color-line)] bg-[var(--color-panel)] p-2 xl:col-span-1">
           <div className="flex flex-col gap-1">
             <button type="button" onClick={() => void save()} className="btn btn-secondary w-full py-1.5 text-xs">
@@ -416,9 +358,19 @@ export function ResumeEditor() {
                 {chatReply}
               </p>
             )}
-            {proposed && (
+            {proposed?.hunks?.length ? (
               <div className="mt-1 rounded border border-amber-500/40 bg-amber-500/5 p-1.5">
-                <p className="text-[10px] font-medium text-amber-700">Edit · {proposed.section}</p>
+                <p className="text-[10px] font-medium text-amber-700">
+                  Diffs · {proposed.section} · {proposed.hunks.length} hunk(s)
+                </p>
+                <ul className="mt-1 max-h-36 space-y-1 overflow-y-auto text-[10px]">
+                  {proposed.hunks.map((h, i) => (
+                    <li key={i} className="rounded bg-black/5 p-1 font-mono">
+                      <div className="text-red-700/90">− {h.find.slice(0, 120)}</div>
+                      <div className="text-green-800/90">+ {h.replace.slice(0, 120)}</div>
+                    </li>
+                  ))}
+                </ul>
                 <div className="mt-1 flex gap-1">
                   <button type="button" onClick={() => void applyEdit()} className="btn btn-warn py-0.5 text-[10px]">
                     Apply
@@ -441,37 +393,24 @@ export function ResumeEditor() {
                   )}
                 </div>
               </div>
-            )}
+            ) : null}
           </div>
         </aside>
 
-        {/* 2/5 editor */}
         <section className="flex min-h-0 flex-col overflow-hidden rounded border border-[var(--color-line)] bg-[#1e1e1e] xl:col-span-2">
           <div className="shrink-0 border-b border-white/10 px-2 py-1 text-[10px] text-white/60">
             {resume.track === 'latex' ? 'LaTeX source' : 'Structured form'}
           </div>
           <div className="min-h-0 flex-1">
             {resume.track === 'latex' ? (
-              <div
-                className="h-full"
-                ref={(node) => {
-                  if (!node || (node as HTMLElement & { _sx?: boolean })._sx) return
-                  ;(node as HTMLElement & { _sx?: boolean })._sx = true
-                  node.addEventListener('synctex-forward', ((ev: Event) => {
-                    const d = (ev as CustomEvent).detail as { line: number; column: number }
-                    void forwardSearch(d.line, d.column)
-                  }) as EventListener)
+              <LatexEditor
+                value={latex}
+                onChange={(v) => {
+                  setLatex(v)
+                  setDirty(true)
                 }}
-              >
-                <LatexEditor
-                  value={latex}
-                  onChange={(v) => {
-                    setLatex(v)
-                    setDirty(true)
-                  }}
-                  editorRef={latexRef}
-                />
-              </div>
+                editorRef={latexRef}
+              />
             ) : (
               <div className="h-full overflow-auto bg-[var(--color-panel)] p-2">
                 <StructuredForm
@@ -486,14 +425,8 @@ export function ResumeEditor() {
           </div>
         </section>
 
-        {/* 2/5 pdf.js preview */}
         <section className="flex min-h-0 flex-col overflow-hidden rounded border border-[var(--color-line)] xl:col-span-2">
-          <PdfPreview
-            data={pdfData}
-            busy={previewBusy}
-            highlight={pdfHighlight}
-            onCtrlClick={(pos) => void onPdfCtrlClick(pos)}
-          />
+          <PdfPreview data={pdfData} busy={previewBusy} />
         </section>
       </div>
     </div>

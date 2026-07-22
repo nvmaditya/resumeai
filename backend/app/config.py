@@ -17,9 +17,14 @@ class Settings(BaseSettings):
     hiring_agent_path: str = str(Path(__file__).resolve().parents[1] / "vendor" / "hiring-agent")
     # Optional absolute path to tectonic.exe; else backend/bin/tectonic.exe then PATH
     tectonic_path: str = ""
-    coach_backend: str = "ollama"  # ollama | stub
+    coach_backend: str = "ollama"  # ollama | openrouter | groq | stub
+    coach_model: str = ""  # empty → backend default / ollama_model
     ollama_base_url: str = "http://127.0.0.1:11434"
     ollama_model: str = "gemma3:4b"
+    openrouter_api_key: str = ""
+    openrouter_base_url: str = "https://openrouter.ai/api/v1"
+    groq_api_key: str = ""
+    groq_base_url: str = "https://api.groq.com/openai/v1"
 
     @property
     def cors_origin_list(self) -> list[str]:

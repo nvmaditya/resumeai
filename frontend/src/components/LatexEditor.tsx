@@ -28,7 +28,6 @@ const latexHighlight = HighlightStyle.define([
 export type LatexEditorHandle = {
   highlightRange: (from: number, to: number) => void
   findAndHighlight: (query: string) => boolean
-  /** 1-based line, 0-based column (SyncTeX) */
   goToLine: (line: number, column?: number) => void
   getCursor: () => { line: number; column: number }
   getValue: () => string
@@ -134,17 +133,6 @@ export function LatexEditor({ value, onChange, editorRef }: Props) {
       },
     }
 
-    // Ctrl/Cmd+Click in editor → forward search (custom event)
-    view.dom.addEventListener('click', (ev) => {
-      if (!(ev.ctrlKey || ev.metaKey)) return
-      const cur = handle.getCursor()
-      host.current?.dispatchEvent(
-        new CustomEvent('synctex-forward', {
-          bubbles: true,
-          detail: { line: cur.line, column: cur.column },
-        }),
-      )
-    })
     if (editorRef) editorRef.current = handle
 
     return () => {

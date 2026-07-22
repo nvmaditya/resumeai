@@ -62,10 +62,15 @@ class JobOut(BaseModel):
     updated_at: datetime
 
 
+class EditHunk(BaseModel):
+    find: str
+    replace: str
+
+
 class ProposedEdit(BaseModel):
     section: str
-    before: str
-    after: str
+    before: str = ""
+    hunks: list[EditHunk] = Field(default_factory=list)
 
 
 class ChatRequest(BaseModel):
@@ -87,4 +92,4 @@ class ChatResponse(BaseModel):
 
 class ApplyEditRequest(BaseModel):
     section: str
-    after: str
+    hunks: list[EditHunk] = Field(default_factory=list)

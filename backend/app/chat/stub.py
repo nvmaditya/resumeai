@@ -8,7 +8,7 @@ from app.chat.safety import (
     MAX_EDIT_CHARS,
     MAX_RESUME_CHARS,
 )
-from app.schemas import ChatResponse, ProposedEdit
+from app.schemas import ChatResponse, EditHunk, ProposedEdit
 
 
 class StubCoach:
@@ -34,9 +34,8 @@ class StubCoach:
         grounded = "; ".join(s for s in suggestions[:4] if s) or "no score yet — run score first"
         jd_note = f" JD data length={len(jd)}." if jd else " No JD provided."
 
-        # Internal prompt assembly (not returned) — fences untrusted blocks
         _ = (
-            f"SYSTEM: You are a resume coach. Only use score evidence and resume/JD data.\n"
+            f"SYSTEM: resume coach. Only use score evidence and resume/JD data.\n"
             f"TASK: {instruction}\n"
             f"{wrap_untrusted('RESUME', resume[:2000])}\n"
             f"{wrap_untrusted('JD', jd)}\n"
@@ -46,29 +45,32 @@ class StubCoach:
         reply = (
             f"Action: {action.replace('_', ' ')}. "
             f"Grounded on: {grounded}.{jd_note} "
-            f"Focus on measurable impact and missing keywords; re-score after applying edits."
+            f"Hunks rephrase existing text only — no invented facts. Re-score after apply."
         )
+
+        hunks: list[EditHunk] = []
+        section = "latex"
+        if "\\begin{document}" in resume:
+            find = "\\begin{document}"
+            replace = "\\begin{document}\n% AI: strengthen impact metrics (stub)\n"
+            hunks = [EditHunk(find=find, replace=replace)]
+        elif resume.strip().startswith("{") or '"basics"' in resume:
+            section = "summary"
+            reply += " Structured track: add metrics only if already true; stub has no summary hunk."
+        elif resume:
+            # last non-empty line as unique-ish find
+            lines = [ln for ln in resume.splitlines() if ln.strip()]
+            if lines:
+                find = lines[-1]
+                hunks = [EditHunk(find=find, replace=find + " [AI: quantify if already true]")]
+                section = "summary"
 
         before = resume if len(resume) < 800 else resume[:800]
-        after = before
-        if "\\begin{document}" in before:
-            after = before.replace(
-                "\\begin{document}",
-                "\\begin{document}\n% AI: strengthen impact metrics\n",
-                1,
+        pe = None
+        if hunks:
+            pe = ProposedEdit(
+                section=section,
+                before=before[:MAX_EDIT_CHARS],
+                hunks=hunks,
             )
-        elif before.strip().startswith("{") or '"basics"' in before:
-            after = before  # structured: client applies field-level; propose summary bump
-            reply += " Consider adding metrics to basics.summary and top project highlights."
-        elif before:
-            after = before + "\n\n[AI: add quantified impact to top project.]"
-        else:
-            after = "Improved summary with metrics."
-
-        after = sanitize_text(after, max_len=MAX_EDIT_CHARS, field="edit")
-        section = "latex" if "\\begin{document}" in before or "\\documentclass" in before else "summary"
-
-        return ChatResponse(
-            reply=reply,
-            proposed_edit=ProposedEdit(section=section, before=before[:MAX_EDIT_CHARS], after=after),
-        )
+        return ChatResponse(reply=reply, proposed_edit=pe)

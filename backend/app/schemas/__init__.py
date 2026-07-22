@@ -2,6 +2,7 @@ from app.schemas.api import (
     ApplyEditRequest,
     ChatRequest,
     ChatResponse,
+    EditHunk,
     JobOut,
     LoginRequest,
     ProposedEdit,
@@ -24,6 +25,7 @@ __all__ = [
     "JobOut",
     "ChatRequest",
     "ChatResponse",
+    "EditHunk",
     "ProposedEdit",
     "ApplyEditRequest",
 ]

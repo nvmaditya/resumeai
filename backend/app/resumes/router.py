@@ -191,13 +191,11 @@ def compile_resume(
     pdf_key = f"users/{user.id}/resumes/{resume.id}/out.pdf"
     if result.get("pdf_bytes"):
         store.put(pdf_key, result["pdf_bytes"])
-        # also keep a copy next to synctex for CLI
         (work / "main.pdf").write_bytes(result["pdf_bytes"])
         result = {
             **{k: v for k, v in result.items() if k != "pdf_bytes"},
             "pdf_key": pdf_key,
             "engine": result.get("engine", "layout"),
-            "synctex": bool(result.get("synctex")),
             "download_path": f"/api/v1/resumes/{resume.id}/pdf",
             "preview_path": f"/api/v1/resumes/{resume.id}/pdf?inline=1",
         }
@@ -235,64 +233,6 @@ def download_pdf(
             "Content-Length": str(len(data)),
         },
     )
-
-
-@router.post("/{resume_id}/synctex/edit")
-def synctex_edit(
-    resume_id: str,
-    body: dict,
-    user: User = Depends(get_current_user),
-    session: Session = Depends(get_session),
-) -> dict:
-    """Inverse search: PDF click (page,x,y top-left bp) → tex line/column via official synctex CLI."""
-    from app.compile.synctex import inverse_search
-    from app.config import get_settings
-
-    resume = _load_owned(session, user, resume_id)
-    work = _work_dir(get_settings().data_dir, user.id, resume.id)
-    pdf_path = work / "main.pdf"
-    if not pdf_path.exists():
-        raise HTTPException(status_code=404, detail="Compile first (no work PDF for SyncTeX)")
-    try:
-        page = int(body.get("page") or 1)
-        x = float(body.get("x") or 0)
-        y = float(body.get("y") or 0)
-        hit = inverse_search(pdf_path=pdf_path, page=page, x=x, y=y, work_dir=work)
-        return hit
-    except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-
-@router.post("/{resume_id}/synctex/view")
-def synctex_view(
-    resume_id: str,
-    body: dict,
-    user: User = Depends(get_current_user),
-    session: Session = Depends(get_session),
-) -> dict:
-    """Forward search: editor line/column → PDF page/x/y via official synctex CLI."""
-    from app.compile.synctex import forward_search
-    from app.config import get_settings
-
-    resume = _load_owned(session, user, resume_id)
-    work = _work_dir(get_settings().data_dir, user.id, resume.id)
-    pdf_path = work / "main.pdf"
-    tex_path = work / "main.tex"
-    if not pdf_path.exists() or not tex_path.exists():
-        raise HTTPException(status_code=404, detail="Compile first (no SyncTeX work files)")
-    try:
-        line = int(body.get("line") or 1)
-        column = int(body.get("column") or 0)
-        hit = forward_search(
-            tex_path=tex_path,
-            pdf_path=pdf_path,
-            line=line,
-            column=column,
-            work_dir=work,
-        )
-        return hit
-    except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.post("/{resume_id}/extract")
@@ -425,16 +365,25 @@ def apply_edit(
     session: Session = Depends(get_session),
     store: ObjectStore = Depends(get_store),
 ) -> ResumeOut:
+    from app.chat.hunks import apply_hunks
     from app.chat.safety import MAX_EDIT_CHARS, sanitize_text
     from app.latex_validate import validate_latex_apply
 
     resume = _load_owned(session, user, resume_id)
-    after = sanitize_text(body.after, max_len=MAX_EDIT_CHARS, field="after")
     section = (body.section or "")[:64]
+    hunks = body.hunks or []
+    if not hunks:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="hunks required")
+
     if section == "latex" or (resume.track == "latex" and section != "summary"):
         before = ""
         if resume.latex_key and store.exists(resume.latex_key):
             before = store.get(resume.latex_key).decode("utf-8", errors="replace")
+        try:
+            after = apply_hunks(before, hunks)
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        after = sanitize_text(after, max_len=MAX_EDIT_CHARS, field="after")
         err = validate_latex_apply(before, after)
         if err:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=err)
@@ -445,11 +394,19 @@ def apply_edit(
         data = dict(resume.structured_json or _empty_structured())
         if section in ("summary", "basics.summary"):
             basics = dict(data.get("basics") or {})
-            basics["summary"] = after
+            current = str(basics.get("summary") or "")
+            try:
+                basics["summary"] = apply_hunks(current, hunks)
+            except ValueError as exc:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
             data["basics"] = basics
         else:
-            # ponytail: top-level key only
-            data[section.split(".")[0]] = after
+            key0 = section.split(".")[0]
+            current = str(data.get(key0) or "")
+            try:
+                data[key0] = apply_hunks(current, hunks)
+            except ValueError as exc:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
         resume.structured_json = data
     resume.updated_at = datetime.now(timezone.utc)
     session.add(resume)

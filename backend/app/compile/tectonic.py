@@ -1,4 +1,4 @@
-"""Real LaTeX compile via tectonic with SyncTeX artifacts."""
+"""Real LaTeX compile via tectonic (layout fallback if missing/fails)."""
 
 from __future__ import annotations
 
@@ -8,7 +8,6 @@ from pathlib import Path
 from typing import Any
 
 from app.compile.pdf_layout import render_resume_pdf
-from app.compile.synctex import ensure_synctex_preamble
 
 
 def resolve_tectonic(tectonic_path: str | None = None) -> Path | None:
@@ -34,7 +33,6 @@ def structured_to_tex(title: str, data: dict[str, Any] | None) -> str:
     summary = (basics.get("summary") or "").replace("&", "\\&")
     lines = [
         r"\documentclass[11pt,letterpaper]{article}",
-        r"\synctex=1",
         r"\usepackage[margin=0.75in]{geometry}",
         r"\usepackage[T1]{fontenc}",
         r"\usepackage{lmodern}",
@@ -137,7 +135,6 @@ class TectonicCompiler:
             source = structured_to_tex(title, structured)
         else:
             source = latex or r"\documentclass{article}\begin{document}Empty\end{document}"
-        source = ensure_synctex_preamble(source)
 
         if work_dir is None:
             import tempfile
@@ -148,8 +145,6 @@ class TectonicCompiler:
             work = Path(work_dir).resolve()
             work.mkdir(parents=True, exist_ok=True)
 
-        # Always use basename + absolute cwd. Passing a relative path as the
-        # tectonic input while cwd=work makes tectonic look for work/work/main.tex.
         tex_path = work / "main.tex"
         tex_path.write_text(source, encoding="utf-8", newline="\n")
         if not tex_path.is_file():
@@ -184,20 +179,15 @@ class TectonicCompiler:
             )
 
         data = pdf_path.read_bytes()
-        synctex = work / "main.synctex.gz"
-        if not synctex.exists():
-            synctex = work / "main.synctex"
         return {
             "ok": True,
-            "message": "compiled with tectonic (+synctex)",
+            "message": "compiled with tectonic",
             "pdf_bytes": data,
             "bytes": len(data),
             "engine": "tectonic",
             "work_dir": str(work),
             "tex_path": str(tex_path),
             "pdf_path": str(pdf_path),
-            "synctex_path": str(synctex) if synctex.exists() else None,
-            "synctex": synctex.exists(),
         }
 
     def _fallback(
@@ -211,11 +201,10 @@ class TectonicCompiler:
         pdf = render_resume_pdf(title=title, track=track, latex=latex, structured=structured)
         return {
             "ok": True,
-            "message": f"layout fallback (no SyncTeX): {reason[:300]}",
+            "message": f"layout fallback: {reason[:300]}",
             "pdf_bytes": pdf,
             "bytes": len(pdf),
             "engine": "layout",
-            "synctex": False,
         }
 
 
@@ -246,7 +235,6 @@ class LayoutCompiler:
             "pdf_bytes": pdf,
             "bytes": len(pdf),
             "engine": "layout",
-            "synctex": False,
             "work_dir": str(work_dir) if work_dir else None,
         }
 

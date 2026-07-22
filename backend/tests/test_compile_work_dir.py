@@ -16,7 +16,5 @@ def test_tectonic_with_nested_absolute_work(tmp_path: Path):
     )
     assert out["ok"] is True
     assert out.get("engine") == "tectonic", out.get("message")
-    assert out.get("synctex") is True, out
     assert (work / "main.tex").is_file()
     assert (work / "main.pdf").is_file()
-    assert (work / "main.synctex.gz").is_file() or (work / "main.synctex").is_file()

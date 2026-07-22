@@ -68,6 +68,7 @@ backend\.venv\Scripts\python.exe scripts\install_hooks.py   # once per clone
 | v0.1.0 | Scaffold + hiring-agent vendor + auth/resumes/score stubs |
 | v0.2.0 | Light UI, structured form, safe coach, PDF layout + live preview |
 | v0.3.0 | 1/5–2/5–2/5 workspace + tectonic Overleaf-parity compile |
+| v0.5.0 | Drop SyncTeX/pdf.js; coach hunks + hiring-agent rubric; openrouter/groq |
 
 ### Repo
 

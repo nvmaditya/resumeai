@@ -36,10 +36,15 @@ async def lifespan(app: FastAPI):
     app.state.compiler = build_compiler(settings.tectonic_path or None)
     app.state.latex_engine = "tectonic" if resolve_tectonic(settings.tectonic_path or None) else "layout"
     app.state.extractor = StubExtractor()
+    coach_model = settings.coach_model or settings.ollama_model
     app.state.coach = build_coach(
         backend=settings.coach_backend,
+        model=coach_model,
         ollama_base_url=settings.ollama_base_url,
-        ollama_model=settings.ollama_model,
+        openrouter_api_key=settings.openrouter_api_key,
+        openrouter_base_url=settings.openrouter_base_url,
+        groq_api_key=settings.groq_api_key,
+        groq_base_url=settings.groq_base_url,
     )
     app.state.github = StubGitHubClient()
     yield
@@ -69,6 +74,7 @@ def create_app() -> FastAPI:
             "score_backend": settings.score_backend,
             "latex_engine": eng,
             "coach_backend": settings.coach_backend,
+            "coach_model": settings.coach_model or settings.ollama_model,
             "ollama_model": settings.ollama_model,
         }
 
