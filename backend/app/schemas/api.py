@@ -19,10 +19,39 @@ class TokenOut(BaseModel):
     token_type: str = "bearer"
 
 
+class UserProfile(BaseModel):
+    display_name: str = ""
+    github_username: str = ""
+    linkedin_url: str = ""
+    portfolio_url: str = ""
+    headline: str = ""
+
+
 class UserOut(BaseModel):
     id: str
     email: str
     created_at: datetime
+    profile: UserProfile = Field(default_factory=UserProfile)
+
+
+class UserUpdate(BaseModel):
+    profile: Optional[UserProfile] = None
+
+
+class ScoreRequest(BaseModel):
+    job_description: Optional[str] = Field(default=None, max_length=4000)
+
+
+class VersionCommitRequest(BaseModel):
+    message: str = Field(default="", max_length=200)
+
+
+class VersionOut(BaseModel):
+    id: str
+    message: str
+    created_at: str
+    sha256: str
+    size: int
 
 
 class ResumeCreate(BaseModel):

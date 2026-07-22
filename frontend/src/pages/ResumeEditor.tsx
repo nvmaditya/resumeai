@@ -1,6 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { api, downloadFile, fetchPdfBytes, type Job, type Resume } from '../api/client'
+import {
+  api,
+  downloadFile,
+  fetchPdfBytes,
+  type Job,
+  type LatexVersion,
+  type Resume,
+} from '../api/client'
 import { ProgressStepper } from '../components/ProgressStepper'
 import { LatexEditor, type LatexEditorHandle } from '../components/LatexEditor'
 import { PdfPreview } from '../components/PdfPreview'
@@ -44,6 +51,8 @@ export function ResumeEditor() {
   const [pdfData, setPdfData] = useState<ArrayBuffer | null>(null)
   const [previewBusy, setPreviewBusy] = useState(false)
   const [engine, setEngine] = useState('')
+  const [commitMsg, setCommitMsg] = useState('')
+  const [versions, setVersions] = useState<LatexVersion[]>([])
   const compilingRef = useRef(false)
 
   async function load() {
@@ -137,27 +146,77 @@ export function ResumeEditor() {
     }
   }
 
+  async function loadVersions() {
+    try {
+      const list = await api<LatexVersion[]>(`/resumes/${id}/versions`)
+      setVersions(list)
+    } catch {
+      setVersions([])
+    }
+  }
+
+  useEffect(() => {
+    if (id) void loadVersions()
+  }, [id])
+
+  async function commitVersion() {
+    if (dirty) await save()
+    try {
+      const out = await api<{ unchanged?: boolean; version?: LatexVersion }>(`/resumes/${id}/versions`, {
+        method: 'POST',
+        body: JSON.stringify({ message: commitMsg || 'checkpoint' }),
+      })
+      if (out.unchanged) toast.push('No changes since last commit')
+      else toast.push('Version saved')
+      setCommitMsg('')
+      await loadVersions()
+    } catch (ex) {
+      toast.push(ex instanceof Error ? ex.message : 'Commit failed')
+    }
+  }
+
+  async function restoreVersion(vid: string) {
+    try {
+      const r = await api<Resume>(`/resumes/${id}/versions/${vid}/restore`, { method: 'POST', body: '{}' })
+      setResume(r)
+      setLatex(r.latex_body || '')
+      setDirty(false)
+      toast.push('Restored version')
+      void compileAndPreview({ quiet: true })
+    } catch (ex) {
+      toast.push(ex instanceof Error ? ex.message : 'Restore failed')
+    }
+  }
+
   async function score() {
     if (dirty) await save()
     setScoring(true)
-    setStatus('Scoring… (GitHub + LLM)')
+    setStatus('Scoring… (cached GitHub + LLM)')
     try {
-      const j = await api<Job>(`/resumes/${id}/score`, { method: 'POST' })
+      const j = await api<Job>(`/resumes/${id}/score`, {
+        method: 'POST',
+        body: JSON.stringify({ job_description: jd.slice(0, 4000) || null }),
+      })
       setJob(j)
       for (let i = 0; i < 200; i++) {
         await new Promise((r) => setTimeout(r, 500))
         const cur = await api<Job>(`/jobs/${j.id}`)
         setJob(cur)
         if (cur.status === 'complete' || cur.status === 'failed') {
-          const eng = (cur.result_json as { engine?: string; duration_ms?: number; github_enriched?: boolean } | null)
+          const eng = cur.result_json as {
+            engine?: string
+            duration_ms?: number
+            github_enriched?: boolean
+            github_cache?: string
+          } | null
           setStatus(
             `${cur.status}${eng?.engine ? ` · ${eng.engine}` : ''}${
               eng?.duration_ms != null ? ` · ${eng.duration_ms}ms` : ''
-            }${eng?.github_enriched ? ' · GitHub' : ''}`,
+            }${eng?.github_cache ? ` · gh:${eng.github_cache}` : ''}`,
           )
           toast.push(
             cur.status === 'complete'
-              ? `Score: ${cur.result_json?.overall_score ?? '—'}${eng?.github_enriched ? ' (GitHub)' : ''}`
+              ? `Score: ${cur.result_json?.overall_score ?? '—'} (gh ${eng?.github_cache || '—'})`
               : `Score failed: ${cur.error || ''}`,
           )
           break
@@ -266,6 +325,36 @@ export function ResumeEditor() {
             <button type="button" onClick={() => void save()} className="btn btn-secondary w-full py-1.5 text-xs">
               Save
             </button>
+            <div className="flex gap-1">
+              <input
+                className="input min-w-0 flex-1 py-1 text-[10px]"
+                placeholder="Commit message"
+                value={commitMsg}
+                onChange={(e) => setCommitMsg(e.target.value)}
+                maxLength={200}
+              />
+              <button type="button" className="btn btn-secondary py-1 text-[10px]" onClick={() => void commitVersion()}>
+                Commit
+              </button>
+            </div>
+            {versions.length > 0 && (
+              <select
+                className="input py-1 text-[10px]"
+                defaultValue=""
+                onChange={(e) => {
+                  const v = e.target.value
+                  e.target.value = ''
+                  if (v) void restoreVersion(v)
+                }}
+              >
+                <option value="">Restore version…</option>
+                {versions.map((v) => (
+                  <option key={v.id} value={v.id}>
+                    {(v.message || 'checkpoint').slice(0, 40)} · {new Date(v.created_at).toLocaleString()}
+                  </option>
+                ))}
+              </select>
+            )}
             <button
               type="button"
               onClick={() => void compileAndPreview()}
@@ -398,8 +487,28 @@ export function ResumeEditor() {
         </aside>
 
         <section className="flex min-h-0 flex-col overflow-hidden rounded border border-[var(--color-line)] bg-[#1e1e1e] xl:col-span-2">
-          <div className="shrink-0 border-b border-white/10 px-2 py-1 text-[10px] text-white/60">
-            {resume.track === 'latex' ? 'LaTeX source' : 'Structured form'}
+          <div className="flex shrink-0 items-center justify-between gap-2 border-b border-white/10 px-2 py-1 text-[10px] text-white/60">
+            <span>{resume.track === 'latex' ? 'LaTeX source' : 'Structured form'}</span>
+            {resume.track === 'latex' && (
+              <span className="flex gap-1">
+                <button
+                  type="button"
+                  className="rounded px-1.5 py-0.5 hover:bg-white/10"
+                  title="Undo"
+                  onClick={() => latexRef.current?.undo()}
+                >
+                  Undo
+                </button>
+                <button
+                  type="button"
+                  className="rounded px-1.5 py-0.5 hover:bg-white/10"
+                  title="Redo"
+                  onClick={() => latexRef.current?.redo()}
+                >
+                  Redo
+                </button>
+              </span>
+            )}
           </div>
           <div className="min-h-0 flex-1">
             {resume.track === 'latex' ? (

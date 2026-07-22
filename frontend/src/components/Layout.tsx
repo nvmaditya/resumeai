@@ -29,6 +29,14 @@ export function Layout() {
             >
               Resumes
             </NavLink>
+            <NavLink
+              to="/settings"
+              className={({ isActive }) =>
+                isActive ? 'text-[var(--color-text)] font-medium' : 'hover:text-[var(--color-text)] transition-colors'
+              }
+            >
+              Settings
+            </NavLink>
             <button
               type="button"
               className="btn btn-secondary py-1.5 text-xs"

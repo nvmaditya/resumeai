@@ -1,4 +1,2 @@
-from app.auth.router import router
-from app.auth.security import create_access_token, hash_password, verify_password
-
-__all__ = ["router", "hash_password", "verify_password", "create_access_token"]
+# Avoid circular imports with app.deps — import router/security from their modules.
+__all__: list[str] = []

@@ -7,6 +7,11 @@ from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
 from app.config import Settings
+from app.github.cache import (
+    github_blob_to_text,
+    jd_keyword_match,
+    select_top_repos,
+)
 
 
 @runtime_checkable
@@ -21,6 +26,7 @@ def stub_result(job_id: str, *, overall: int = 72) -> dict[str, Any]:
         "overall_score": overall,
         "engine": "stub",
         "github_enriched": False,
+        "github_cache": "n/a",
         "duration_ms": 0,
         "categories": [
             {
@@ -70,7 +76,11 @@ def stub_result(job_id: str, *, overall: int = 72) -> dict[str, Any]:
 
 class StubScoreEngine:
     def run(self, snapshot: dict[str, Any], job_id: str) -> dict[str, Any]:
-        return stub_result(job_id)
+        out = stub_result(job_id)
+        jd = snapshot.get("job_description") or ""
+        if jd:
+            out["jd_match"] = jd_keyword_match(jd, str(snapshot.get("latex_body") or ""))
+        return out
 
 
 _GITHUB_URL_RE = re.compile(
@@ -109,7 +119,7 @@ def extract_github_url(text: str, structured: dict[str, Any] | None) -> str | No
 
 
 class HiringAgentScoreEngine:
-    """Full hiring-agent path: resume text + optional GitHub enrich + LLM evaluate."""
+    """Resume text + user GitHub *cache* (no live GitHub) + LLM evaluate."""
 
     def __init__(self, vendor_path: str) -> None:
         self.vendor_path = Path(vendor_path)
@@ -123,13 +133,15 @@ class HiringAgentScoreEngine:
 
         structured = snapshot.get("structured_json")
         latex = snapshot.get("latex_body") or ""
+        jd = (snapshot.get("job_description") or "").strip()
         text, github_url = self._resume_text(structured, latex)
-        github_data: dict[str, Any] = {}
+        # Prefer cached snapshot passed in by score route (never fetch here)
+        gh_snap = snapshot.get("github_snapshot")
         github_enriched = False
+        github_cache = "missing"
+        github_data: dict[str, Any] = {}
 
         try:
-            # Do NOT os.chdir — that races with compile paths (process-global CWD).
-            # Point TemplateManager at absolute templates instead.
             from prompts import template_manager as tm  # type: ignore
 
             abs_templates = str(vendor / "prompts" / "templates")
@@ -142,23 +154,22 @@ class HiringAgentScoreEngine:
 
             tm.TemplateManager.__init__ = _init  # type: ignore[method-assign]
 
-            if github_url:
-                try:
-                    from github import fetch_and_display_github_info  # type: ignore
-
-                    github_data = fetch_and_display_github_info(github_url) or {}
-                    github_enriched = bool(
-                        github_data.get("profile") or github_data.get("projects")
-                    )
-                except Exception as exc:
-                    github_data = {"error": str(exc)}
+            if isinstance(gh_snap, dict) and (gh_snap.get("profile") or gh_snap.get("repos")):
+                github_cache = "hit"
+                profile = gh_snap.get("profile") or {}
+                repos = list(gh_snap.get("repos") or [])
+                top = select_top_repos(repos, jd or None, k=5)
+                github_data = {"profile": profile, "projects": top, "total_projects": len(top)}
+                github_enriched = True
+                if not github_url and gh_snap.get("username"):
+                    github_url = f"https://github.com/{gh_snap['username']}"
+            else:
+                github_cache = "missing"
+                # intentionally no live GitHub fetch
 
             from evaluator import ResumeEvaluator  # type: ignore
             from prompt import DEFAULT_MODEL, MODEL_PARAMETERS  # type: ignore
-            from transform import (  # type: ignore
-                convert_github_data_to_text,
-                convert_json_resume_to_text,
-            )
+            from transform import convert_json_resume_to_text  # type: ignore
 
             if structured:
                 try:
@@ -172,7 +183,17 @@ class HiringAgentScoreEngine:
                 resume_text = text
 
             if github_enriched:
-                resume_text = resume_text + "\n\n" + convert_github_data_to_text(github_data)
+                resume_text = resume_text + "\n\n" + github_blob_to_text(
+                    github_data.get("profile"),
+                    list(github_data.get("projects") or []),
+                )
+
+            if jd:
+                resume_text = (
+                    resume_text
+                    + "\n\n=== JOB DESCRIPTION (for relevance; score technical evidence only) ===\n"
+                    + jd[:4000]
+                )
 
             if not resume_text.strip():
                 raise ValueError("empty resume text for evaluation")
@@ -183,7 +204,10 @@ class HiringAgentScoreEngine:
             result = _map_evaluation(evaluation, job_id)
             result["engine"] = "hiring_agent"
             result["github_enriched"] = github_enriched
+            result["github_cache"] = github_cache
             result["github_url"] = github_url
+            result["github_repos_used"] = len(github_data.get("projects") or []) if github_enriched else 0
+            result["jd_match"] = jd_keyword_match(jd or None, resume_text)
             result["duration_ms"] = int((time.perf_counter() - t0) * 1000)
             return result
         except Exception as exc:
@@ -194,16 +218,12 @@ class HiringAgentScoreEngine:
                 "overall_score": 0,
                 "engine": "hiring_agent",
                 "github_enriched": github_enriched,
+                "github_cache": github_cache,
                 "github_url": github_url,
                 "duration_ms": ms,
                 "error": str(exc),
                 "categories": [],
-                "jd_match": {
-                    "provided": False,
-                    "matched_keywords": [],
-                    "missing_keywords": [],
-                    "relevance_score": 0,
-                },
+                "jd_match": jd_keyword_match(jd or None, text),
             }
 
     def _resume_text(
@@ -212,7 +232,6 @@ class HiringAgentScoreEngine:
         if structured:
             blob = str(structured)
             return blob, extract_github_url(blob, structured)
-        # strip light latex noise for LLM readability
         text = latex
         text = re.sub(r"%.*?$", "", text, flags=re.M)
         text = re.sub(r"\\[a-zA-Z]+\*?", " ", text)

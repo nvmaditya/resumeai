@@ -10,8 +10,13 @@ from app.schemas.api import (
     ResumeCreate,
     ResumeOut,
     ResumeUpdate,
+    ScoreRequest,
     TokenOut,
     UserOut,
+    UserProfile,
+    UserUpdate,
+    VersionCommitRequest,
+    VersionOut,
 )
 
 __all__ = [
@@ -19,6 +24,8 @@ __all__ = [
     "LoginRequest",
     "TokenOut",
     "UserOut",
+    "UserProfile",
+    "UserUpdate",
     "ResumeCreate",
     "ResumeUpdate",
     "ResumeOut",
@@ -28,4 +35,7 @@ __all__ = [
     "EditHunk",
     "ProposedEdit",
     "ApplyEditRequest",
+    "ScoreRequest",
+    "VersionCommitRequest",
+    "VersionOut",
 ]

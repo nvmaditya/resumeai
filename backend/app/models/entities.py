@@ -18,6 +18,7 @@ class User(SQLModel, table=True):
     id: str = Field(default_factory=_uuid, primary_key=True)
     email: str = Field(index=True, unique=True)
     password_hash: str
+    profile_json: Optional[dict[str, Any]] = Field(default=None, sa_column=Column(JSON))
     created_at: datetime = Field(default_factory=_utcnow)
 
 

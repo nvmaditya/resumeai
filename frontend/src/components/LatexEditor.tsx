@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react'
 import { EditorState } from '@codemirror/state'
 import { EditorView, keymap, highlightActiveLine, lineNumbers } from '@codemirror/view'
-import { defaultKeymap, history, historyKeymap } from '@codemirror/commands'
+import { defaultKeymap, history, historyKeymap, undo, redo } from '@codemirror/commands'
 import { StreamLanguage, syntaxHighlighting, HighlightStyle } from '@codemirror/language'
 import { tags } from '@lezer/highlight'
 import { searchKeymap, highlightSelectionMatches } from '@codemirror/search'
@@ -31,6 +31,8 @@ export type LatexEditorHandle = {
   goToLine: (line: number, column?: number) => void
   getCursor: () => { line: number; column: number }
   getValue: () => string
+  undo: () => void
+  redo: () => void
 }
 
 type Props = {
@@ -130,6 +132,12 @@ export function LatexEditor({ value, onChange, editorRef }: Props) {
           }
         }
         return false
+      },
+      undo: () => {
+        undo(view)
+      },
+      redo: () => {
+        redo(view)
       },
     }
 

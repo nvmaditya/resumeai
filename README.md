@@ -70,6 +70,8 @@ Workspace (desktop): **1/5** actions · **2/5** editor · **2/5** PDF (browser-n
 
 Coach proposes **find/replace hunks** (no invented facts); Accept applies them and recompiles. Coach backends: `ollama` | `openrouter` | `groq` | `stub`.
 
+**Versions:** Commit message snapshots latex (hash-skip, cap 30). **Settings:** profile + GitHub username. **Score** uses cached GitHub data only — click **Update GitHub data** in Settings to refresh (no GitHub API on each score). Pass JD on score for top-repo pick + keyword match.
+
 ## Tectonic (Overleaf-like PDFs)
 
 Drop the binary at:

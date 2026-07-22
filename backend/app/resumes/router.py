@@ -16,6 +16,9 @@ from app.schemas import (
     ResumeCreate,
     ResumeOut,
     ResumeUpdate,
+    ScoreRequest,
+    VersionCommitRequest,
+    VersionOut,
 )
 from app.storage.protocol import ObjectStore
 
@@ -260,18 +263,25 @@ def score_resume(
     user: User = Depends(get_current_user),
     session: Session = Depends(get_session),
     store: ObjectStore = Depends(get_store),
+    body: ScoreRequest = ScoreRequest(),
 ) -> JobOut:
+    from app.chat.safety import sanitize_jd
+    from app.github.cache import load_snapshot
+
     resume = _load_owned(session, user, resume_id)
     job = ScoreJob(resume_id=resume.id, user_id=user.id, status="queued")
     session.add(job)
     session.commit()
     session.refresh(job)
 
+    jd = sanitize_jd(body.job_description if body else None)
     snapshot = {
         "resume_id": resume.id,
         "track": resume.track,
         "structured_json": resume.structured_json,
         "latex_body": None,
+        "job_description": jd,
+        "github_snapshot": load_snapshot(store, user.id),
     }
     if resume.latex_key and store.exists(resume.latex_key):
         snapshot["latex_body"] = store.get(resume.latex_key).decode("utf-8", errors="replace")
@@ -318,6 +328,61 @@ def score_resume(
         created_at=job.created_at,
         updated_at=job.updated_at,
     )
+
+
+@router.get("/{resume_id}/versions", response_model=list[VersionOut])
+def list_resume_versions(
+    resume_id: str,
+    user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+    store: ObjectStore = Depends(get_store),
+) -> list[VersionOut]:
+    from app.resumes.versions import list_versions
+
+    resume = _load_owned(session, user, resume_id)
+    items = list_versions(store, user.id, resume.id)
+    return [VersionOut(**v) for v in items]
+
+
+@router.post("/{resume_id}/versions")
+def commit_resume_version(
+    resume_id: str,
+    body: VersionCommitRequest,
+    user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+    store: ObjectStore = Depends(get_store),
+) -> dict:
+    from app.resumes.versions import commit_version
+
+    resume = _load_owned(session, user, resume_id)
+    latex = ""
+    if resume.latex_key and store.exists(resume.latex_key):
+        latex = store.get(resume.latex_key).decode("utf-8", errors="replace")
+    return commit_version(store, user.id, resume.id, latex, body.message or "")
+
+
+@router.post("/{resume_id}/versions/{version_id}/restore", response_model=ResumeOut)
+def restore_resume_version(
+    resume_id: str,
+    version_id: str,
+    user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+    store: ObjectStore = Depends(get_store),
+) -> ResumeOut:
+    from app.resumes.versions import read_version_body
+
+    resume = _load_owned(session, user, resume_id)
+    body = read_version_body(store, user.id, resume.id, version_id)
+    if body is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Version not found")
+    key = resume.latex_key or _latex_key(user.id, resume.id)
+    store.put(key, body.encode("utf-8"))
+    resume.latex_key = key
+    resume.updated_at = datetime.now(timezone.utc)
+    session.add(resume)
+    session.commit()
+    session.refresh(resume)
+    return _to_out(resume, store)
 
 
 @router.post("/{resume_id}/chat", response_model=ChatResponse)

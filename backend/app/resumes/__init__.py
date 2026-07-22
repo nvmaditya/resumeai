@@ -1,3 +1,2 @@
-from app.resumes.router import router
-
-__all__ = ["router"]
+# Avoid circular imports — import router from app.resumes.router
+__all__: list[str] = []

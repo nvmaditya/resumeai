@@ -59,7 +59,26 @@ export async function fetchPdfBytes(path: string): Promise<ArrayBuffer> {
   return blob.arrayBuffer()
 }
 
-export type User = { id: string; email: string }
+export type UserProfile = {
+  display_name: string
+  github_username: string
+  linkedin_url: string
+  portfolio_url: string
+  headline: string
+}
+export type User = {
+  id: string
+  email: string
+  created_at?: string
+  profile?: UserProfile
+}
+export type LatexVersion = {
+  id: string
+  message: string
+  created_at: string
+  sha256: string
+  size: number
+}
 export type Resume = {
   id: string
   title: string
