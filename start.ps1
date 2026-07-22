@@ -19,9 +19,8 @@ if (-not $env:DATABASE_URL) {
   $env:DATABASE_URL = "sqlite:///$db"
 }
 if (-not $env:CORS_ORIGINS) { $env:CORS_ORIGINS = 'http://localhost:5173' }
-if (-not $env:SCORE_BACKEND) { $env:SCORE_BACKEND = 'hiring_agent' }
-if (-not $env:COACH_BACKEND) { $env:COACH_BACKEND = 'ollama' }
-if (-not $env:OLLAMA_MODEL) { $env:OLLAMA_MODEL = 'gemma3:4b' }
+# Do NOT force COACH_BACKEND / SCORE_BACKEND here — process env overrides backend/.env
+# (pydantic: env > env_file). Let backend/.env control coach (ollama|openrouter|groq|stub).
 # No --reload: dual reloader processes were serving stale compile code
 & '__PY__' -m uvicorn app.main:app --host 127.0.0.1 --port 8000
 '@

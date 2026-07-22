@@ -36,7 +36,15 @@ async def lifespan(app: FastAPI):
     app.state.compiler = build_compiler(settings.tectonic_path or None)
     app.state.latex_engine = "tectonic" if resolve_tectonic(settings.tectonic_path or None) else "layout"
     app.state.extractor = StubExtractor()
-    coach_model = settings.coach_model or settings.ollama_model
+    # Default model per backend when COACH_MODEL empty
+    coach_model = (settings.coach_model or "").strip()
+    if not coach_model:
+        if settings.coach_backend == "groq":
+            coach_model = "llama-3.3-70b-versatile"
+        elif settings.coach_backend == "openrouter":
+            coach_model = "openai/gpt-4o-mini"
+        else:
+            coach_model = settings.ollama_model
     app.state.coach = build_coach(
         backend=settings.coach_backend,
         model=coach_model,
