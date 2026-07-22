@@ -50,6 +50,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
 
   const toggle = useCallback(() => {
     if (busy.current) return
+    const prev = theme
     const next: Theme = theme === 'light' ? 'dark' : 'light'
 
     if (prefersReducedMotion()) {
@@ -58,9 +59,8 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     }
 
     busy.current = true
-    // Cover with destination ink; flip theme under it; slide cover off diagonally
-    setWipe({ bg: INK[next], out: false })
-    // next frame: apply theme, then animate out
+    // Cover = outgoing ink; new theme applied under; hole opens from BR
+    setWipe({ bg: INK[prev], out: false })
     requestAnimationFrame(() => {
       setTheme(next)
       requestAnimationFrame(() => {
@@ -84,8 +84,8 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
           <div
             className={`theme-wipe${wipe.out ? ' theme-wipe-out' : ''}`}
             style={{ ['--wipe-bg' as string]: wipe.bg }}
-            onTransitionEnd={(e) => {
-              if (e.propertyName === 'transform' && wipe.out) onWipeEnd()
+            onAnimationEnd={(e) => {
+              if (e.animationName.includes('theme-wipe') && wipe.out) onWipeEnd()
             }}
             aria-hidden
           />,

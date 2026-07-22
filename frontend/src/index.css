@@ -69,20 +69,44 @@
   --pdf-chrome-fg: #94a3b8;
 }
 
-/* Diagonal theme wipe cover */
+/*
+ * Theme reveal: old-ink cover with a hole that starts as a triangle at
+ * bottom-right; hypotenuse expands toward top-left until the cover is gone
+ * and the new theme (already under) is fully visible.
+ */
 .theme-wipe {
   position: fixed;
   inset: 0;
   z-index: 9999;
   pointer-events: none;
   background: var(--wipe-bg, #0b0f14);
-  transform-origin: 100% 0%;
-  transform: translate3d(0, 0, 0) skewY(-8deg) scale(1.15);
-  transition: transform 0.55s cubic-bezier(0.65, 0, 0.35, 1);
-  will-change: transform;
+  /* full cover before open (tiny BR notch so the first frame already reads as a triangle hole) */
+  clip-path: polygon(0 0, 100% 0, 100% 100%, 0 100%);
+  will-change: clip-path;
 }
 .theme-wipe.theme-wipe-out {
-  transform: translate3d(110%, -110%, 0) skewY(-8deg) scale(1.15);
+  animation: theme-wipe-br-open 0.58s cubic-bezier(0.65, 0, 0.35, 1) forwards;
+}
+@keyframes theme-wipe-br-open {
+  /* hole = small triangle at BR (cover missing that corner) */
+  0% {
+    clip-path: polygon(0 0, 100% 0, 100% 92%, 92% 100%, 0 100%);
+  }
+  /* hypotenuse expands — still a triangular bite growing from BR */
+  28% {
+    clip-path: polygon(0 0, 100% 0, 100% 55%, 55% 100%, 0 100%);
+  }
+  /* hole is half-screen diagonal: cover remaining is TL triangle only */
+  52% {
+    clip-path: polygon(0 0, 100% 0, 0 100%);
+  }
+  /* no longer a triangle — cover collapses toward TL as hole floods NW */
+  78% {
+    clip-path: polygon(0 0, 42% 0, 0 42%);
+  }
+  100% {
+    clip-path: polygon(0 0, 0 0, 0 0);
+  }
 }
 @media (prefers-reduced-motion: reduce) {
   .theme-wipe {
