@@ -39,16 +39,29 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   const [wipe, setWipe] = useState<{
     bg: string
     out: boolean
-    next: Theme
   } | null>(null)
   const wiping = wipe !== null
   const busy = useRef(false)
   const pendingTheme = useRef<Theme | null>(null)
+  const safetyTimer = useRef<number | null>(null)
 
   useEffect(() => {
     apply(theme)
     localStorage.setItem('theme', theme)
   }, [theme])
+
+  const finishWipe = useCallback(() => {
+    if (safetyTimer.current != null) {
+      window.clearTimeout(safetyTimer.current)
+      safetyTimer.current = null
+    }
+    const next = pendingTheme.current
+    if (!next && !busy.current) return
+    pendingTheme.current = null
+    setWipe(null)
+    if (next) setTheme(next)
+    busy.current = false
+  }, [])
 
   const toggle = useCallback(() => {
     if (busy.current) return
@@ -62,32 +75,18 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
 
     busy.current = true
     pendingTheme.current = next
-    // CSS vars under cover (no React tree work yet)
+    // CSS under cover only — no React/CodeMirror work mid-wipe
     apply(next)
     localStorage.setItem('theme', next)
 
-    // Full cover first frame, then clip-path only (no setTheme mid-flight)
-    setWipe({ bg: INK[prev], out: false, next })
+    setWipe({ bg: INK[prev], out: false })
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
         setWipe((w) => (w ? { ...w, out: true } : null))
       })
     })
-    // Safety if animationend is missed
-    window.setTimeout(() => {
-      if (pendingTheme.current === next) onWipeEnd()
-    }, 700)
-  }, [theme])
-
-  const onWipeEnd = useCallback(() => {
-    if (!busy.current && !pendingTheme.current) return
-    const next = pendingTheme.current
-    pendingTheme.current = null
-    setWipe(null)
-    // Sync React after wipe so CodeMirror reconfigure is not mid-animation
-    if (next) setTheme(next)
-    busy.current = false
-  }, [])
+    safetyTimer.current = window.setTimeout(finishWipe, 700)
+  }, [theme, finishWipe])
 
   const value = useMemo(() => ({ theme, toggle, wiping }), [theme, toggle, wiping])
 
@@ -102,7 +101,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
             onAnimationEnd={(e) => {
               if (e.target !== e.currentTarget) return
               if (!String(e.animationName).includes('theme-wipe')) return
-              if (wipe.out) onWipeEnd()
+              if (wipe.out) finishWipe()
             }}
             aria-hidden
           />,
