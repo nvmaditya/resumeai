@@ -54,6 +54,11 @@ export async function fetchPdfObjectUrl(path: string): Promise<string> {
   return URL.createObjectURL(blob)
 }
 
+export async function fetchPdfBytes(path: string): Promise<ArrayBuffer> {
+  const blob = await fetchBlob(path)
+  return blob.arrayBuffer()
+}
+
 export type User = { id: string; email: string }
 export type Resume = {
   id: string

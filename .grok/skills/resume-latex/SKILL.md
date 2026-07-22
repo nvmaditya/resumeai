@@ -38,11 +38,24 @@ Desktop: **1/5** actions/score/coach · **2/5** editor · **2/5** PDF preview.
 6. Proposed edits must return full replaceable body for section `latex` or `summary`.
 7. After LaTeX changes: recompile with tectonic; verify `engine=tectonic` and PDF size > 1KB.
 
+## Scoring
+
+- Default `SCORE_BACKEND=hiring_agent` (not stub). Stub is instant fake scores.
+- Pipeline: resume text → GitHub URL extract → `github.fetch_and_display_github_info` → LLM evaluate.
+- Health must show `score_backend: hiring_agent` for real scoring.
+
 ## Coach + Ollama
 
 - `COACH_BACKEND=ollama` (default), model `gemma3:4b` unless `OLLAMA_MODEL` set.
 - Untrusted resume/JD always fenced (`<<<UNTRUSTED_*>>>`); strip injection phrases.
+- Apply-edit rejects LaTeX that drops `\documentclass` / `\begin{document}` / `\end{document}`.
 - If Ollama down: surface error in reply; do not crash the API.
+
+## Editor / PDF UX
+
+- CodeMirror LaTeX highlighting (not plain textarea).
+- pdf.js canvas preview (not browser `<iframe>` PDF chrome).
+- Click PDF text → search/highlight matching source in editor (string match MVP).
 
 ## Tests to run after LaTeX/coach changes
 

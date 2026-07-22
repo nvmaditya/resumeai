@@ -13,7 +13,7 @@ class Settings(BaseSettings):
     jwt_expire_minutes: int = 60 * 24 * 7
     cors_origins: str = "http://localhost:5173"
     data_dir: str = "./data"
-    score_backend: str = "stub"  # stub | hiring_agent
+    score_backend: str = "hiring_agent"  # hiring_agent | stub
     hiring_agent_path: str = str(Path(__file__).resolve().parents[1] / "vendor" / "hiring-agent")
     # Optional absolute path to tectonic.exe; else backend/bin/tectonic.exe then PATH
     tectonic_path: str = ""

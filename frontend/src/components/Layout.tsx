@@ -51,7 +51,7 @@ export function Layout() {
           </nav>
         </div>
       </header>
-      <main className="mx-auto h-[calc(100vh-3.25rem)] max-w-[100rem] px-4 py-3">
+      <main className="mx-auto h-[calc(100vh-2.75rem)] max-w-[100rem] px-2 py-1.5">
         <Outlet />
       </main>
     </div>

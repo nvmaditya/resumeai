@@ -279,9 +279,13 @@ def score_resume(
             s.commit()
             try:
                 result = engine.run(snapshot, job_id=job.id)
-                row.status = "complete"
                 row.result_json = result
-                row.error = None
+                if result.get("status") == "failed" or result.get("error"):
+                    row.status = "failed"
+                    row.error = str(result.get("error") or "scoring failed")
+                else:
+                    row.status = "complete"
+                    row.error = None
             except Exception as exc:  # ponytail: surface failure on job row
                 row.status = "failed"
                 row.error = str(exc)
@@ -347,11 +351,18 @@ def apply_edit(
     store: ObjectStore = Depends(get_store),
 ) -> ResumeOut:
     from app.chat.safety import MAX_EDIT_CHARS, sanitize_text
+    from app.latex_validate import validate_latex_apply
 
     resume = _load_owned(session, user, resume_id)
     after = sanitize_text(body.after, max_len=MAX_EDIT_CHARS, field="after")
     section = (body.section or "")[:64]
     if section == "latex" or (resume.track == "latex" and section != "summary"):
+        before = ""
+        if resume.latex_key and store.exists(resume.latex_key):
+            before = store.get(resume.latex_key).decode("utf-8", errors="replace")
+        err = validate_latex_apply(before, after)
+        if err:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=err)
         key = resume.latex_key or _latex_key(user.id, resume.id)
         store.put(key, after.encode("utf-8"))
         resume.latex_key = key
