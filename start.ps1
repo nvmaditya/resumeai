@@ -22,7 +22,8 @@ if (-not $env:CORS_ORIGINS) { $env:CORS_ORIGINS = 'http://localhost:5173' }
 if (-not $env:SCORE_BACKEND) { $env:SCORE_BACKEND = 'hiring_agent' }
 if (-not $env:COACH_BACKEND) { $env:COACH_BACKEND = 'ollama' }
 if (-not $env:OLLAMA_MODEL) { $env:OLLAMA_MODEL = 'gemma3:4b' }
-& '__PY__' -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+# No --reload: dual reloader processes were serving stale compile code
+& '__PY__' -m uvicorn app.main:app --host 127.0.0.1 --port 8000
 '@
 $backendScript = $backendScript.Replace('__ROOT__', $Root).Replace('__PY__', $Py)
 [System.IO.File]::WriteAllText($be, $backendScript)
