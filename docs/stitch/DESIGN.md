@@ -9,7 +9,8 @@ ResumeAI is an AI resume optimization tool for software engineers: multi-resume 
 - Trustworthy scoring (evidence-first), not gamified fluff
 
 ## Visual direction
-- **Mode:** Dark (primary). Optional light later.
+- **Mode:** Light + dark (toggle). Theme switch uses a **diagonal cover wipe** (~0.55s); honor `prefers-reduced-motion`.
+- **Editor / PDF:** Follow theme tokens (`--editor-*`, `--pdf-chrome-*`). Light = calm slate IDE; dark = VS-style ink.
 - **Background:** Deep slate/ink `#0B0F14` → elevated panels `#12181F`
 - **Primary accent:** Emerald `#10B981` (score, CTAs, success)
 - **Secondary accent:** Amber `#F59E0B` (proposed edits, warnings)

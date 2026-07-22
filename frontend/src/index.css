@@ -24,6 +24,19 @@
   --grad-a: rgba(5, 150, 105, 0.1);
   --grad-b: rgba(5, 150, 105, 0.04);
   --shadow: 0 10px 40px rgba(15, 23, 42, 0.06);
+  /* LaTeX / PDF surfaces */
+  --editor-bg: #f8fafc;
+  --editor-fg: #0f172a;
+  --editor-gutter: #f1f5f9;
+  --editor-gutter-fg: #94a3b8;
+  --editor-active: #e2e8f0;
+  --editor-caret: #0f172a;
+  --editor-comment: #64748b;
+  --editor-keyword: #0369a1;
+  --editor-bracket: #b45309;
+  --editor-string: #b45309;
+  --pdf-chrome-bg: #f1f5f9;
+  --pdf-chrome-fg: #64748b;
 }
 
 [data-theme="dark"] {
@@ -42,6 +55,39 @@
   --grad-a: rgba(16, 185, 129, 0.12);
   --grad-b: rgba(16, 185, 129, 0.05);
   --shadow: 0 20px 60px rgba(0, 0, 0, 0.35);
+  --editor-bg: #1e1e1e;
+  --editor-fg: #d4d4d4;
+  --editor-gutter: #1e1e1e;
+  --editor-gutter-fg: #858585;
+  --editor-active: #2a2d2e;
+  --editor-caret: #aeafad;
+  --editor-comment: #6a9955;
+  --editor-keyword: #569cd6;
+  --editor-bracket: #ffd700;
+  --editor-string: #ce9178;
+  --pdf-chrome-bg: #1a1f26;
+  --pdf-chrome-fg: #94a3b8;
+}
+
+/* Diagonal theme wipe cover */
+.theme-wipe {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  pointer-events: none;
+  background: var(--wipe-bg, #0b0f14);
+  transform-origin: 100% 0%;
+  transform: translate3d(0, 0, 0) skewY(-8deg) scale(1.15);
+  transition: transform 0.55s cubic-bezier(0.65, 0, 0.35, 1);
+  will-change: transform;
+}
+.theme-wipe.theme-wipe-out {
+  transform: translate3d(110%, -110%, 0) skewY(-8deg) scale(1.15);
+}
+@media (prefers-reduced-motion: reduce) {
+  .theme-wipe {
+    display: none;
+  }
 }
 
 body {

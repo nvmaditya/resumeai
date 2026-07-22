@@ -1,10 +1,11 @@
 import { useEffect, useRef } from 'react'
-import { EditorState } from '@codemirror/state'
+import { Compartment, EditorState } from '@codemirror/state'
 import { EditorView, keymap, highlightActiveLine, lineNumbers } from '@codemirror/view'
 import { defaultKeymap, history, historyKeymap, undo, redo } from '@codemirror/commands'
 import { StreamLanguage, syntaxHighlighting, HighlightStyle } from '@codemirror/language'
 import { tags } from '@lezer/highlight'
 import { searchKeymap, highlightSelectionMatches } from '@codemirror/search'
+import { useTheme } from '../theme'
 
 const latexLanguage = StreamLanguage.define({
   token(stream) {
@@ -18,12 +19,52 @@ const latexLanguage = StreamLanguage.define({
   },
 })
 
-const latexHighlight = HighlightStyle.define([
-  { tag: tags.comment, color: '#6a9955', fontStyle: 'italic' },
-  { tag: tags.keyword, color: '#569cd6' },
-  { tag: tags.bracket, color: '#ffd700' },
-  { tag: tags.string, color: '#ce9178' },
-])
+function highlightFor(theme: 'light' | 'dark') {
+  const isLight = theme === 'light'
+  return HighlightStyle.define([
+    {
+      tag: tags.comment,
+      color: isLight ? '#64748b' : '#6a9955',
+      fontStyle: 'italic',
+    },
+    { tag: tags.keyword, color: isLight ? '#0369a1' : '#569cd6' },
+    { tag: tags.bracket, color: isLight ? '#b45309' : '#ffd700' },
+    { tag: tags.string, color: isLight ? '#b45309' : '#ce9178' },
+  ])
+}
+
+function editorTheme(theme: 'light' | 'dark') {
+  const light = theme === 'light'
+  return EditorView.theme(
+    {
+      '&': {
+        height: '100%',
+        fontSize: '13px',
+        backgroundColor: light ? '#f8fafc' : '#1e1e1e',
+        color: light ? '#0f172a' : '#d4d4d4',
+      },
+      '.cm-scroller': {
+        fontFamily: 'JetBrains Mono, Consolas, monospace',
+        overflow: 'auto',
+      },
+      '.cm-gutters': {
+        backgroundColor: light ? '#f1f5f9' : '#1e1e1e',
+        color: light ? '#94a3b8' : '#858585',
+        border: 'none',
+      },
+      '.cm-activeLineGutter': {
+        backgroundColor: light ? '#e2e8f0' : '#2a2a2a',
+      },
+      '.cm-activeLine': {
+        backgroundColor: light ? '#e2e8f0' : '#2a2d2e',
+      },
+      '.cm-content': {
+        caretColor: light ? '#0f172a' : '#aeafad',
+      },
+    },
+    { dark: !light },
+  )
+}
 
 export type LatexEditorHandle = {
   highlightRange: (from: number, to: number) => void
@@ -42,8 +83,11 @@ type Props = {
 }
 
 export function LatexEditor({ value, onChange, editorRef }: Props) {
+  const { theme } = useTheme()
   const host = useRef<HTMLDivElement>(null)
   const viewRef = useRef<EditorView | null>(null)
+  const themeComp = useRef(new Compartment())
+  const hlComp = useRef(new Compartment())
   const onChangeRef = useRef(onChange)
   onChangeRef.current = onChange
 
@@ -58,32 +102,13 @@ export function LatexEditor({ value, onChange, editorRef }: Props) {
           highlightActiveLine(),
           history(),
           latexLanguage,
-          syntaxHighlighting(latexHighlight),
+          hlComp.current.of(syntaxHighlighting(highlightFor(theme))),
           highlightSelectionMatches(),
           keymap.of([...defaultKeymap, ...historyKeymap, ...searchKeymap]),
           EditorView.updateListener.of((u) => {
             if (u.docChanged) onChangeRef.current(u.state.doc.toString())
           }),
-          EditorView.theme({
-            '&': {
-              height: '100%',
-              fontSize: '13px',
-              backgroundColor: '#1e1e1e',
-              color: '#d4d4d4',
-            },
-            '.cm-scroller': {
-              fontFamily: 'JetBrains Mono, Consolas, monospace',
-              overflow: 'auto',
-            },
-            '.cm-gutters': {
-              backgroundColor: '#1e1e1e',
-              color: '#858585',
-              border: 'none',
-            },
-            '.cm-activeLineGutter': { backgroundColor: '#2a2a2a' },
-            '.cm-activeLine': { backgroundColor: '#2a2d2e' },
-            '.cm-content': { caretColor: '#aeafad' },
-          }),
+          themeComp.current.of(editorTheme(theme)),
           EditorView.lineWrapping,
         ],
       }),
@@ -154,11 +179,28 @@ export function LatexEditor({ value, onChange, editorRef }: Props) {
   useEffect(() => {
     const view = viewRef.current
     if (!view) return
+    view.dispatch({
+      effects: [
+        themeComp.current.reconfigure(editorTheme(theme)),
+        hlComp.current.reconfigure(syntaxHighlighting(highlightFor(theme))),
+      ],
+    })
+  }, [theme])
+
+  useEffect(() => {
+    const view = viewRef.current
+    if (!view) return
     const cur = view.state.doc.toString()
     if (cur !== value) {
       view.dispatch({ changes: { from: 0, to: cur.length, insert: value } })
     }
   }, [value])
 
-  return <div ref={host} className="h-full min-h-0 w-full overflow-hidden" />
+  return (
+    <div
+      ref={host}
+      className="h-full min-h-0 w-full overflow-hidden"
+      style={{ background: 'var(--editor-bg)' }}
+    />
+  )
 }

@@ -4,16 +4,31 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from 'react'
+import { createPortal } from 'react-dom'
 
 type Theme = 'light' | 'dark'
 
-const ThemeCtx = createContext<{ theme: Theme; toggle: () => void } | null>(null)
+const ThemeCtx = createContext<{
+  theme: Theme
+  toggle: () => void
+  wiping: boolean
+} | null>(null)
+
+const INK: Record<Theme, string> = {
+  light: '#f4f6f8',
+  dark: '#0b0f14',
+}
 
 function apply(theme: Theme) {
   document.documentElement.setAttribute('data-theme', theme)
+}
+
+function prefersReducedMotion() {
+  return window.matchMedia('(prefers-reduced-motion: reduce)').matches
 }
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
@@ -21,6 +36,12 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     const saved = localStorage.getItem('theme') as Theme | null
     return saved === 'dark' || saved === 'light' ? saved : 'light'
   })
+  const [wipe, setWipe] = useState<{
+    bg: string
+    out: boolean
+  } | null>(null)
+  const wiping = wipe !== null
+  const busy = useRef(false)
 
   useEffect(() => {
     apply(theme)
@@ -28,11 +49,50 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   }, [theme])
 
   const toggle = useCallback(() => {
-    setTheme((t) => (t === 'light' ? 'dark' : 'light'))
+    if (busy.current) return
+    const next: Theme = theme === 'light' ? 'dark' : 'light'
+
+    if (prefersReducedMotion()) {
+      setTheme(next)
+      return
+    }
+
+    busy.current = true
+    // Cover with destination ink; flip theme under it; slide cover off diagonally
+    setWipe({ bg: INK[next], out: false })
+    // next frame: apply theme, then animate out
+    requestAnimationFrame(() => {
+      setTheme(next)
+      requestAnimationFrame(() => {
+        setWipe((w) => (w ? { ...w, out: true } : null))
+      })
+    })
+  }, [theme])
+
+  const onWipeEnd = useCallback(() => {
+    setWipe(null)
+    busy.current = false
   }, [])
 
-  const value = useMemo(() => ({ theme, toggle }), [theme, toggle])
-  return <ThemeCtx.Provider value={value}>{children}</ThemeCtx.Provider>
+  const value = useMemo(() => ({ theme, toggle, wiping }), [theme, toggle, wiping])
+
+  return (
+    <ThemeCtx.Provider value={value}>
+      {children}
+      {wipe &&
+        createPortal(
+          <div
+            className={`theme-wipe${wipe.out ? ' theme-wipe-out' : ''}`}
+            style={{ ['--wipe-bg' as string]: wipe.bg }}
+            onTransitionEnd={(e) => {
+              if (e.propertyName === 'transform' && wipe.out) onWipeEnd()
+            }}
+            aria-hidden
+          />,
+          document.body,
+        )}
+    </ThemeCtx.Provider>
+  )
 }
 
 export function useTheme() {

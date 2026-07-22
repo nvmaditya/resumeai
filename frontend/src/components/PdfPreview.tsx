@@ -19,12 +19,18 @@ export function PdfPreview({ data, busy }: Props) {
   }, [url])
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-[var(--color-panel-2)]">
-      <div className="flex shrink-0 items-center justify-between gap-2 border-b border-[var(--color-line)] px-2 py-1 text-[10px] text-[var(--color-muted)]">
+    <div
+      className="flex h-full min-h-0 flex-col"
+      style={{ background: 'var(--pdf-chrome-bg)' }}
+    >
+      <div
+        className="flex shrink-0 items-center justify-between gap-2 border-b border-[var(--color-line)] px-2 py-1 text-[10px]"
+        style={{ color: 'var(--pdf-chrome-fg)' }}
+      >
         <span>PDF preview</span>
-        {busy && <span className="text-amber-600">Updating…</span>}
+        {busy && <span className="text-[var(--color-warn)]">Updating…</span>}
       </div>
-      <div className="min-h-0 flex-1">
+      <div className="min-h-0 flex-1 bg-[var(--color-panel)]">
         {!data && (
           <p className="p-4 text-center text-sm text-[var(--color-muted)]">
             {busy ? 'Rendering…' : 'Compile to preview'}
@@ -34,7 +40,7 @@ export function PdfPreview({ data, busy }: Props) {
           <iframe
             title="PDF preview"
             src={url}
-            className="h-full w-full border-0 bg-white"
+            className="h-full w-full border-0 bg-[var(--color-panel)]"
           />
         )}
       </div>

@@ -4,7 +4,7 @@ import { useTheme } from '../theme'
 
 export function Layout() {
   const nav = useNavigate()
-  const { theme, toggle } = useTheme()
+  const { theme, toggle, wiping } = useTheme()
 
   return (
     <div className="min-h-screen">
@@ -41,6 +41,7 @@ export function Layout() {
               type="button"
               className="btn btn-secondary py-1.5 text-xs"
               onClick={toggle}
+              disabled={wiping}
               aria-label="Toggle color theme"
               title="Toggle light/dark"
             >

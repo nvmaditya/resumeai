@@ -520,14 +520,20 @@ export function ResumeEditor() {
           </div>
         </aside>
 
-        <section className="flex min-h-0 flex-col overflow-hidden rounded border border-[var(--color-line)] bg-[#1e1e1e] xl:col-span-2">
-          <div className="flex shrink-0 items-center justify-between gap-2 border-b border-white/10 px-2 py-1 text-[10px] text-white/60">
+        <section
+          className="flex min-h-0 flex-col overflow-hidden rounded border border-[var(--color-line)] xl:col-span-2"
+          style={{ background: 'var(--editor-bg)' }}
+        >
+          <div
+            className="flex shrink-0 items-center justify-between gap-2 border-b border-[var(--color-line)] px-2 py-1 text-[10px]"
+            style={{ color: 'var(--editor-gutter-fg)' }}
+          >
             <span>{resume.track === 'latex' ? 'LaTeX source' : 'Structured form'}</span>
             {resume.track === 'latex' && (
               <span className="flex gap-1">
                 <button
                   type="button"
-                  className="rounded px-1.5 py-0.5 hover:bg-white/10"
+                  className="rounded px-1.5 py-0.5 hover:bg-[var(--editor-active)]"
                   title="Undo"
                   onClick={() => latexRef.current?.undo()}
                 >
@@ -535,7 +541,7 @@ export function ResumeEditor() {
                 </button>
                 <button
                   type="button"
-                  className="rounded px-1.5 py-0.5 hover:bg-white/10"
+                  className="rounded px-1.5 py-0.5 hover:bg-[var(--editor-active)]"
                   title="Redo"
                   onClick={() => latexRef.current?.redo()}
                 >
