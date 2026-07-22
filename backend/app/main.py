@@ -5,7 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.auth.router import router as auth_router
-from app.chat.stub import StubCoach
+from app.chat.ollama import build_coach
 from app.compile.tectonic import build_compiler, resolve_tectonic
 from app.config import get_settings
 from app.db import init_db
@@ -32,14 +32,18 @@ async def lifespan(app: FastAPI):
     app.state.compiler = build_compiler(settings.tectonic_path or None)
     app.state.latex_engine = "tectonic" if resolve_tectonic(settings.tectonic_path or None) else "layout"
     app.state.extractor = StubExtractor()
-    app.state.coach = StubCoach()
+    app.state.coach = build_coach(
+        backend=settings.coach_backend,
+        ollama_base_url=settings.ollama_base_url,
+        ollama_model=settings.ollama_model,
+    )
     app.state.github = StubGitHubClient()
     yield
 
 
 def create_app() -> FastAPI:
     settings = get_settings()
-    app = FastAPI(title="ResumeAI", version="0.3.0", lifespan=lifespan)
+    app = FastAPI(title="ResumeAI", version="0.3.1", lifespan=lifespan)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origin_list,
@@ -60,6 +64,8 @@ def create_app() -> FastAPI:
             "env": settings.app_env,
             "score_backend": settings.score_backend,
             "latex_engine": eng,
+            "coach_backend": settings.coach_backend,
+            "ollama_model": settings.ollama_model,
         }
 
     return app

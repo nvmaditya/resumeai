@@ -4,6 +4,12 @@ Local-first AI resume optimization SaaS shell (SaaS-ready seams). FastAPI + Reac
 
 ## Quick start
 
+One shot (two windows):
+
+```powershell
+.\start.ps1
+```
+
 ### Backend (Python 3.12+)
 
 ```powershell

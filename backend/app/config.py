@@ -17,6 +17,9 @@ class Settings(BaseSettings):
     hiring_agent_path: str = str(Path(__file__).resolve().parents[1] / "vendor" / "hiring-agent")
     # Optional absolute path to tectonic.exe; else backend/bin/tectonic.exe then PATH
     tectonic_path: str = ""
+    coach_backend: str = "ollama"  # ollama | stub
+    ollama_base_url: str = "http://127.0.0.1:11434"
+    ollama_model: str = "gemma3:4b"
 
     @property
     def cors_origin_list(self) -> list[str]:
