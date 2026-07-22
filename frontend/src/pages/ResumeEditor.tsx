@@ -655,7 +655,9 @@ export function ResumeEditor() {
               )}
               {dualMode && editView === 'form' && (
                 <span className="text-[var(--color-muted)]">
-                  PDF uses LaTeX · form saved for scoring
+                  {resume.template_id
+                    ? 'Form fills template · empty sections omitted · Save updates PDF'
+                    : 'PDF uses LaTeX · form saved for scoring'}
                 </span>
               )}
             </div>

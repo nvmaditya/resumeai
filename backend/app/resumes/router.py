@@ -26,7 +26,8 @@ from app.schemas import (
     VersionOut,
 )
 from app.storage.protocol import ObjectStore
-from app.templates_catalog import list_templates, load_template_body
+from app.templates_catalog import list_templates
+from app.templates_fill import render_template
 
 router = APIRouter(prefix="/resumes", tags=["resumes"])
 templates_router = APIRouter(prefix="/templates", tags=["templates"])
@@ -107,18 +108,16 @@ def create_resume(
     structured = None
 
     if template_id:
+        track = "latex"
+        structured = body.structured_json or _empty_structured()
         try:
-            latex_body = load_template_body(template_id)
+            latex_body = render_template(
+                template_id, structured, title=body.title or ""
+            )
         except ValueError as exc:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
             ) from exc
-        track = "latex"
-        # dual edit: form + latex; compile still uses latex shell
-        structured = body.structured_json or _empty_structured()
-        if not body.title or body.title in ("Untitled Resume", "Structured resume"):
-            # client may send generic title; keep if custom
-            pass
 
     if track == "structured":
         structured = body.structured_json or _empty_structured()
@@ -215,7 +214,22 @@ def update_resume(
         resume.tags = normalize_tags(body.tags)
     if body.structured_json is not None:
         resume.structured_json = body.structured_json
-    if body.latex_body is not None:
+    # form SoT for templates: regenerate latex from structured (overwrites hand latex)
+    if resume.template_id and body.structured_json is not None:
+        try:
+            filled = render_template(
+                resume.template_id,
+                resume.structured_json or {},
+                title=resume.title or "",
+            )
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+            ) from exc
+        key = resume.latex_key or _latex_key(user.id, resume.id)
+        store.put(key, filled.encode("utf-8"))
+        resume.latex_key = key
+    elif body.latex_body is not None:
         key = resume.latex_key or _latex_key(user.id, resume.id)
         store.put(key, body.latex_body.encode("utf-8"))
         resume.latex_key = key
@@ -263,7 +277,25 @@ def compile_resume(
     resume = _load_owned(session, user, resume_id)
     compiler = request.app.state.compiler
     latex = None
-    if resume.latex_key and store.exists(resume.latex_key):
+    # form SoT: always re-fill from structured before compile when using a template
+    if resume.template_id and resume.structured_json is not None:
+        try:
+            latex = render_template(
+                resume.template_id,
+                resume.structured_json,
+                title=resume.title or "",
+            )
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+            ) from exc
+        key = resume.latex_key or _latex_key(user.id, resume.id)
+        store.put(key, latex.encode("utf-8"))
+        resume.latex_key = key
+        resume.updated_at = datetime.now(timezone.utc)
+        session.add(resume)
+        session.commit()
+    elif resume.latex_key and store.exists(resume.latex_key):
         latex = store.get(resume.latex_key).decode("utf-8", errors="replace")
     work = _work_dir(get_settings().data_dir, user.id, resume.id)
     result = compiler.compile(
