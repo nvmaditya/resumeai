@@ -39,9 +39,11 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   const [wipe, setWipe] = useState<{
     bg: string
     out: boolean
+    next: Theme
   } | null>(null)
   const wiping = wipe !== null
   const busy = useRef(false)
+  const pendingTheme = useRef<Theme | null>(null)
 
   useEffect(() => {
     apply(theme)
@@ -59,18 +61,31 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     }
 
     busy.current = true
-    // Cover = outgoing ink; new theme applied under; hole opens from BR
-    setWipe({ bg: INK[prev], out: false })
+    pendingTheme.current = next
+    // CSS vars under cover (no React tree work yet)
+    apply(next)
+    localStorage.setItem('theme', next)
+
+    // Full cover first frame, then clip-path only (no setTheme mid-flight)
+    setWipe({ bg: INK[prev], out: false, next })
     requestAnimationFrame(() => {
-      setTheme(next)
       requestAnimationFrame(() => {
         setWipe((w) => (w ? { ...w, out: true } : null))
       })
     })
+    // Safety if animationend is missed
+    window.setTimeout(() => {
+      if (pendingTheme.current === next) onWipeEnd()
+    }, 700)
   }, [theme])
 
   const onWipeEnd = useCallback(() => {
+    if (!busy.current && !pendingTheme.current) return
+    const next = pendingTheme.current
+    pendingTheme.current = null
     setWipe(null)
+    // Sync React after wipe so CodeMirror reconfigure is not mid-animation
+    if (next) setTheme(next)
     busy.current = false
   }, [])
 
@@ -85,7 +100,9 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
             className={`theme-wipe${wipe.out ? ' theme-wipe-out' : ''}`}
             style={{ ['--wipe-bg' as string]: wipe.bg }}
             onAnimationEnd={(e) => {
-              if (e.animationName.includes('theme-wipe') && wipe.out) onWipeEnd()
+              if (e.target !== e.currentTarget) return
+              if (!String(e.animationName).includes('theme-wipe')) return
+              if (wipe.out) onWipeEnd()
             }}
             aria-hidden
           />,

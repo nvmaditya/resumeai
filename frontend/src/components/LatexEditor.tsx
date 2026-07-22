@@ -83,13 +83,16 @@ type Props = {
 }
 
 export function LatexEditor({ value, onChange, editorRef }: Props) {
-  const { theme } = useTheme()
+  const { theme, wiping } = useTheme()
   const host = useRef<HTMLDivElement>(null)
   const viewRef = useRef<EditorView | null>(null)
   const themeComp = useRef(new Compartment())
   const hlComp = useRef(new Compartment())
   const onChangeRef = useRef(onChange)
   onChangeRef.current = onChange
+  // Initial theme from DOM so first paint matches data-theme
+  const initialTheme =
+    (document.documentElement.getAttribute('data-theme') as 'light' | 'dark') || theme
 
   useEffect(() => {
     if (!host.current) return
@@ -102,13 +105,13 @@ export function LatexEditor({ value, onChange, editorRef }: Props) {
           highlightActiveLine(),
           history(),
           latexLanguage,
-          hlComp.current.of(syntaxHighlighting(highlightFor(theme))),
+          hlComp.current.of(syntaxHighlighting(highlightFor(initialTheme))),
           highlightSelectionMatches(),
           keymap.of([...defaultKeymap, ...historyKeymap, ...searchKeymap]),
           EditorView.updateListener.of((u) => {
             if (u.docChanged) onChangeRef.current(u.state.doc.toString())
           }),
-          themeComp.current.of(editorTheme(theme)),
+          themeComp.current.of(editorTheme(initialTheme)),
           EditorView.lineWrapping,
         ],
       }),
@@ -176,7 +179,9 @@ export function LatexEditor({ value, onChange, editorRef }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  // Skip CodeMirror reconfigure while wipe runs — main-thread work hitchs clip-path
   useEffect(() => {
+    if (wiping) return
     const view = viewRef.current
     if (!view) return
     view.dispatch({
@@ -185,7 +190,7 @@ export function LatexEditor({ value, onChange, editorRef }: Props) {
         hlComp.current.reconfigure(syntaxHighlighting(highlightFor(theme))),
       ],
     })
-  }, [theme])
+  }, [theme, wiping])
 
   useEffect(() => {
     const view = viewRef.current

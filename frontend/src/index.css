@@ -70,9 +70,10 @@
 }
 
 /*
- * Theme reveal: old-ink cover with a hole that starts as a triangle at
- * bottom-right; hypotenuse expands toward top-left until the cover is gone
- * and the new theme (already under) is fully visible.
+ * Theme reveal: outgoing-ink cover; hole grows from bottom-right toward
+ * top-left. ALL keyframes use 5 vertices so clip-path can interpolate
+ * without hitching (vertex-count changes cause stutter).
+ * Points: TL → TR → on-right-edge → on-bottom-edge → BL
  */
 .theme-wipe {
   position: fixed;
@@ -80,32 +81,34 @@
   z-index: 9999;
   pointer-events: none;
   background: var(--wipe-bg, #0b0f14);
-  /* full cover before open (tiny BR notch so the first frame already reads as a triangle hole) */
-  clip-path: polygon(0 0, 100% 0, 100% 100%, 0 100%);
-  will-change: clip-path;
+  /* full cover (degenerate BR corner = full rect, 5 pts) */
+  clip-path: polygon(0% 0%, 100% 0%, 100% 100%, 100% 100%, 0% 100%);
+  /* promote layer; avoid filter/box-shadow on this node */
+  transform: translateZ(0);
+  backface-visibility: hidden;
+  contain: strict;
 }
 .theme-wipe.theme-wipe-out {
-  animation: theme-wipe-br-open 0.58s cubic-bezier(0.65, 0, 0.35, 1) forwards;
+  animation: theme-wipe-br-open 0.58s linear forwards;
 }
 @keyframes theme-wipe-br-open {
-  /* hole = small triangle at BR (cover missing that corner) */
+  /* small triangular bite at BR */
   0% {
-    clip-path: polygon(0 0, 100% 0, 100% 92%, 92% 100%, 0 100%);
+    clip-path: polygon(0% 0%, 100% 0%, 100% 88%, 88% 100%, 0% 100%);
   }
-  /* hypotenuse expands — still a triangular bite growing from BR */
-  28% {
-    clip-path: polygon(0 0, 100% 0, 100% 55%, 55% 100%, 0 100%);
+  25% {
+    clip-path: polygon(0% 0%, 100% 0%, 100% 62%, 62% 100%, 0% 100%);
   }
-  /* hole is half-screen diagonal: cover remaining is TL triangle only */
-  52% {
-    clip-path: polygon(0 0, 100% 0, 0 100%);
+  50% {
+    /* diagonal half — cover is TL region (still 5 pts) */
+    clip-path: polygon(0% 0%, 100% 0%, 100% 0%, 0% 100%, 0% 100%);
   }
-  /* no longer a triangle — cover collapses toward TL as hole floods NW */
-  78% {
-    clip-path: polygon(0 0, 42% 0, 0 42%);
+  75% {
+    /* no longer a simple BR triangle hole — cover shrinks to TL */
+    clip-path: polygon(0% 0%, 45% 0%, 45% 0%, 0% 45%, 0% 45%);
   }
   100% {
-    clip-path: polygon(0 0, 0 0, 0 0);
+    clip-path: polygon(0% 0%, 0% 0%, 0% 0%, 0% 0%, 0% 0%);
   }
 }
 @media (prefers-reduced-motion: reduce) {
