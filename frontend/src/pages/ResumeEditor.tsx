@@ -57,6 +57,8 @@ export function ResumeEditor() {
   const [tagsText, setTagsText] = useState('')
   const [linting, setLinting] = useState(false)
   const [diagnostics, setDiagnostics] = useState<LintDiagnostic[]>([])
+  // form | latex view for dual-mode resumes (template / latex track)
+  const [editView, setEditView] = useState<'form' | 'latex'>('latex')
   const compilingRef = useRef(false)
 
   async function load() {
@@ -67,6 +69,8 @@ export function ResumeEditor() {
     setLatexBackup(r.latex_body || '')
     setStructured(fromApi(r.structured_json as Record<string, unknown>))
     setTagsText((r.tags || []).join(', '))
+    // templates default to form for filling; plain latex stays on source
+    setEditView(r.template_id ? 'form' : r.track === 'latex' ? 'latex' : 'form')
     setDirty(false)
   }
 
@@ -83,10 +87,16 @@ export function ResumeEditor() {
       .filter(Boolean)
   }
 
-  async function save() {
+  const dualMode =
+    !!resume && (resume.track === 'latex' || !!resume.template_id || !!resume.latex_body)
+
+  async function save(opts?: { quiet?: boolean }) {
     const tags = parseTags(tagsText)
-    const body =
-      resume?.track === 'latex'
+    // dual: persist both so Form ↔ LaTeX switch does not drop work
+    // ponytail: no auto form→template fill; compile uses latex_body on latex track
+    const body = dualMode
+      ? { title, latex_body: latex, structured_json: toApi(structured), tags }
+      : resume?.track === 'latex'
         ? { title, latex_body: latex, tags }
         : { title, structured_json: toApi(structured), tags }
     const r = await api<Resume>(`/resumes/${id}`, {
@@ -96,9 +106,11 @@ export function ResumeEditor() {
     setResume(r)
     setTitle(r.title)
     setTagsText((r.tags || []).join(', '))
+    if (r.latex_body != null) setLatex(r.latex_body)
+    setStructured(fromApi(r.structured_json as Record<string, unknown>))
     setDirty(false)
     setStatus('Saved')
-    toast.push('Saved')
+    if (!opts?.quiet) toast.push('Saved')
     return r
   }
 
@@ -129,18 +141,7 @@ export function ResumeEditor() {
       setPreviewBusy(true)
       try {
         if (dirty) {
-          const tags = parseTags(tagsText)
-          const body =
-            resume?.track === 'latex'
-              ? { title, latex_body: latex, tags }
-              : { title, structured_json: toApi(structured), tags }
-          const r = await api<Resume>(`/resumes/${id}`, {
-            method: 'PATCH',
-            body: JSON.stringify(body),
-          })
-          setResume(r)
-          setTagsText((r.tags || []).join(', '))
-          setDirty(false)
+          await save({ quiet: true })
         }
         const out = await api<{
           message: string
@@ -163,7 +164,7 @@ export function ResumeEditor() {
         compilingRef.current = false
       }
     },
-    [dirty, id, latex, resume?.track, structured, tagsText, title, toast],
+    [dirty, id, latex, resume, structured, tagsText, title, toast],
   )
 
   useEffect(() => {
@@ -623,8 +624,42 @@ export function ResumeEditor() {
             className="flex shrink-0 items-center justify-between gap-2 border-b border-[var(--color-line)] px-2 py-1 text-[10px]"
             style={{ color: 'var(--editor-gutter-fg)' }}
           >
-            <span>{resume.track === 'latex' ? 'LaTeX source' : 'Structured form'}</span>
-            {resume.track === 'latex' && (
+            <div className="flex items-center gap-2">
+              {dualMode ? (
+                <div className="flex rounded border border-[var(--color-line)] p-0.5">
+                  <button
+                    type="button"
+                    className={
+                      editView === 'form'
+                        ? 'rounded bg-[var(--editor-active)] px-2 py-0.5 font-medium'
+                        : 'rounded px-2 py-0.5 opacity-70 hover:opacity-100'
+                    }
+                    onClick={() => setEditView('form')}
+                  >
+                    Form
+                  </button>
+                  <button
+                    type="button"
+                    className={
+                      editView === 'latex'
+                        ? 'rounded bg-[var(--editor-active)] px-2 py-0.5 font-medium'
+                        : 'rounded px-2 py-0.5 opacity-70 hover:opacity-100'
+                    }
+                    onClick={() => setEditView('latex')}
+                  >
+                    LaTeX
+                  </button>
+                </div>
+              ) : (
+                <span>Structured form</span>
+              )}
+              {dualMode && editView === 'form' && (
+                <span className="text-[var(--color-muted)]">
+                  PDF uses LaTeX · form saved for scoring
+                </span>
+              )}
+            </div>
+            {dualMode && editView === 'latex' && (
               <span className="flex gap-1">
                 <button
                   type="button"
@@ -646,7 +681,7 @@ export function ResumeEditor() {
             )}
           </div>
           <div className="min-h-0 flex-1">
-            {resume.track === 'latex' ? (
+            {dualMode && editView === 'latex' ? (
               <LatexEditor
                 value={latex}
                 onChange={(v) => {

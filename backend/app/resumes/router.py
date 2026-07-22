@@ -114,6 +114,8 @@ def create_resume(
                 status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
             ) from exc
         track = "latex"
+        # dual edit: form + latex; compile still uses latex shell
+        structured = body.structured_json or _empty_structured()
         if not body.title or body.title in ("Untitled Resume", "Structured resume"):
             # client may send generic title; keep if custom
             pass
