@@ -70,6 +70,7 @@ backend\.venv\Scripts\python.exe scripts\install_hooks.py   # once per clone
 | v0.3.0 | 1/5–2/5–2/5 workspace + tectonic Overleaf-parity compile |
 | v0.5.0 | Drop SyncTeX/pdf.js; coach hunks + hiring-agent rubric; openrouter/groq |
 | v0.6.0 | Undo/redo, latex commits, settings profile, GitHub score cache |
+| v0.6.1 | .tex download, template SoT, API errors, UX polish (DESIGN) |
 
 ### Repo
 
