@@ -209,13 +209,19 @@ def update_resume(
     if body.title is not None:
         resume.title = body.title
     if body.template_id is not None:
-        resume.template_id = body.template_id
+        # empty string clears template link (LaTeX becomes SoT)
+        resume.template_id = body.template_id or None
     if body.tags is not None:
         resume.tags = normalize_tags(body.tags)
     if body.structured_json is not None:
         resume.structured_json = body.structured_json
-    # form SoT for templates: regenerate latex from structured (overwrites hand latex)
-    if resume.template_id and body.structured_json is not None:
+    # Form SoT only when structured is sent *without* an explicit latex override.
+    # If both arrive, prefer latex_body so dual-mode LaTeX edits stick.
+    if (
+        resume.template_id
+        and body.structured_json is not None
+        and body.latex_body is None
+    ):
         try:
             filled = render_template(
                 resume.template_id,
@@ -277,8 +283,11 @@ def compile_resume(
     resume = _load_owned(session, user, resume_id)
     compiler = request.app.state.compiler
     latex = None
-    # form SoT: always re-fill from structured before compile when using a template
-    if resume.template_id and resume.structured_json is not None:
+    # Prefer stored .tex (form save already re-filled templates). Avoid wiping
+    # hand-edited LaTeX on every compile when template_id is still set.
+    if resume.latex_key and store.exists(resume.latex_key):
+        latex = store.get(resume.latex_key).decode("utf-8", errors="replace")
+    elif resume.template_id and resume.structured_json is not None:
         try:
             latex = render_template(
                 resume.template_id,
@@ -295,8 +304,6 @@ def compile_resume(
         resume.updated_at = datetime.now(timezone.utc)
         session.add(resume)
         session.commit()
-    elif resume.latex_key and store.exists(resume.latex_key):
-        latex = store.get(resume.latex_key).decode("utf-8", errors="replace")
     work = _work_dir(get_settings().data_dir, user.id, resume.id)
     result = compiler.compile(
         title=resume.title or "Resume",
@@ -346,6 +353,33 @@ def download_pdf(
         media_type="application/pdf",
         headers={
             "Content-Disposition": f'{disp}; filename="{filename}"',
+            "Cache-Control": "no-store",
+            "Content-Length": str(len(data)),
+        },
+    )
+
+
+@router.get("/{resume_id}/tex")
+def download_tex(
+    resume_id: str,
+    user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+    store: ObjectStore = Depends(get_store),
+) -> Response:
+    """Download LaTeX source for Track A (or any resume that has stored .tex)."""
+    resume = _load_owned(session, user, resume_id)
+    if not resume.latex_key or not store.exists(resume.latex_key):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No LaTeX source for this resume",
+        )
+    data = store.get(resume.latex_key)
+    filename = f"{(resume.title or 'resume').replace(' ', '_')}.tex"
+    return Response(
+        content=data,
+        media_type="application/x-tex",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
             "Cache-Control": "no-store",
             "Content-Length": str(len(data)),
         },

@@ -210,6 +210,9 @@ export function StructuredForm({ value, onChange }: Props) {
               <input className="input" placeholder="Years" value={ed.startDate} onChange={(e) => updateList('education', i, 'startDate', e.target.value)} />
             </div>
           ))}
+          {value.education.length === 0 && (
+            <p className="text-xs text-[var(--color-muted)]">No education entries yet.</p>
+          )}
         </div>
       </section>
 
@@ -230,6 +233,9 @@ export function StructuredForm({ value, onChange }: Props) {
               </button>
             </div>
           ))}
+          {value.skills.length === 0 && (
+            <p className="text-xs text-[var(--color-muted)]">No skills yet — add a category.</p>
+          )}
         </div>
       </section>
 
@@ -258,6 +264,9 @@ export function StructuredForm({ value, onChange }: Props) {
               <textarea className="input min-h-16" placeholder="Highlights (one per line)" value={p.highlights} onChange={(e) => updateList('projects', i, 'highlights', e.target.value)} />
             </div>
           ))}
+          {value.projects.length === 0 && (
+            <p className="text-xs text-[var(--color-muted)]">No projects yet.</p>
+          )}
         </div>
       </section>
     </div>

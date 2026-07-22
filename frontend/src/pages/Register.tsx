@@ -42,8 +42,11 @@ export function Register() {
         </button>
       </div>
       <div className="flex flex-1 items-start justify-center px-4 pb-16 pt-8 sm:pt-12">
-        <div className="card w-full max-w-[420px] p-8">
-          <h1 className="font-display text-2xl font-semibold tracking-tight">Create your account</h1>
+        <div className="card w-full max-w-[420px] p-8 shadow-[var(--shadow)]">
+          <p className="text-xs font-medium uppercase tracking-wider text-[var(--color-muted)]">
+            Free · email + password
+          </p>
+          <h1 className="mt-1 font-display text-2xl font-semibold tracking-tight">Create your account</h1>
           <p className="mt-2 text-sm text-[var(--color-soft)]">
             Local-first resume workspace with ATS scoring and AI coach.
           </p>

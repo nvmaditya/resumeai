@@ -32,9 +32,16 @@ export function PdfPreview({ data, busy }: Props) {
       </div>
       <div className="min-h-0 flex-1 bg-[var(--color-panel)]">
         {!data && (
-          <p className="p-4 text-center text-sm text-[var(--color-muted)]">
-            {busy ? 'Rendering…' : 'Compile to preview'}
-          </p>
+          <div className="flex h-full flex-col items-center justify-center gap-2 p-6 text-center">
+            <p className="font-display text-sm font-medium text-[var(--color-soft)]">
+              {busy ? 'Rendering PDF…' : 'No preview yet'}
+            </p>
+            <p className="max-w-xs text-xs text-[var(--color-muted)]">
+              {busy
+                ? 'Tectonic or layout engine is compiling your resume.'
+                : 'Save and compile to see a live PDF here. Edits recompile after a short pause.'}
+            </p>
+          </div>
         )}
         {url && (
           <iframe

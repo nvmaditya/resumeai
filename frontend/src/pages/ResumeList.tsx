@@ -111,7 +111,9 @@ export function ResumeList() {
         <div>
           <h1 className="font-display text-3xl font-semibold tracking-tight">Your resumes</h1>
           <p className="mt-1 text-sm text-[var(--color-soft)]">
-            {items.length} resume{items.length === 1 ? '' : 's'} · LaTeX or from template
+            {items.length === 0
+              ? 'Create a blank LaTeX resume or start from a template'
+              : `${items.length} resume${items.length === 1 ? '' : 's'} · open one to score, coach, and compile`}
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -121,7 +123,7 @@ export function ResumeList() {
             onClick={() => void createLatex()}
             className="btn btn-primary"
           >
-            New LaTeX
+            {busy ? 'Working…' : 'New LaTeX'}
           </button>
           <button
             type="button"
@@ -214,7 +216,19 @@ export function ResumeList() {
           </div>
         </div>
       ) : filtered.length === 0 ? (
-        <p className="text-sm text-[var(--color-muted)]">No matches.</p>
+        <div className="card px-6 py-10 text-center">
+          <p className="text-sm text-[var(--color-soft)]">No resumes match your filters.</p>
+          <button
+            type="button"
+            className="btn btn-secondary mt-3 text-xs"
+            onClick={() => {
+              setQ('')
+              setTagFilter([])
+            }}
+          >
+            Clear filters
+          </button>
+        </div>
       ) : (
         <ul className="space-y-2.5">
           {filtered.map((r) => (

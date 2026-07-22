@@ -1,5 +1,12 @@
 const STEPS = ['queued', 'processing', 'complete'] as const
 
+const LABELS: Record<string, string> = {
+  queued: 'Queued',
+  processing: 'Processing',
+  complete: 'Complete',
+  failed: 'Failed',
+}
+
 export function ProgressStepper({ status }: { status: string }) {
   const failed = status === 'failed'
   const idx = failed ? -1 : Math.max(0, STEPS.indexOf(status as (typeof STEPS)[number]))
@@ -13,23 +20,28 @@ export function ProgressStepper({ status }: { status: string }) {
           <div key={s} className="flex items-center gap-1.5">
             <span
               className={[
-                'rounded-full px-2.5 py-1 font-medium capitalize transition-colors',
+                'rounded-full px-2.5 py-1 font-medium transition-colors border',
                 current
-                  ? 'bg-[var(--color-accent)] text-white shadow-[0_0_0_3px_rgba(16,185,129,0.2)]'
+                  ? 'bg-[var(--color-accent)] text-white border-transparent shadow-[0_0_0_3px_color-mix(in_srgb,var(--color-accent)_22%,transparent)]'
                   : done
-                    ? 'bg-emerald-950 text-emerald-300 border border-emerald-800'
-                    : 'bg-[var(--color-panel-2)] text-[var(--color-muted)] border border-[var(--color-line)]',
+                    ? 'border-[var(--color-accent)] bg-[color-mix(in_srgb,var(--color-accent)_12%,transparent)] text-[var(--color-accent)]'
+                    : 'bg-[var(--color-panel-2)] text-[var(--color-muted)] border-[var(--color-line)]',
               ].join(' ')}
             >
-              {s}
+              {done ? '✓ ' : current ? '● ' : '○ '}
+              {LABELS[s] || s}
             </span>
-            {i < STEPS.length - 1 && <span className="text-[var(--color-muted)]">→</span>}
+            {i < STEPS.length - 1 && (
+              <span className="text-[var(--color-muted)]" aria-hidden>
+                →
+              </span>
+            )}
           </div>
         )
       })}
       {failed && (
-        <span className="rounded-full bg-rose-950 px-2.5 py-1 font-medium text-rose-300 border border-rose-800">
-          failed
+        <span className="rounded-full border border-[var(--color-danger)] bg-[color-mix(in_srgb,var(--color-danger)_12%,transparent)] px-2.5 py-1 font-medium text-[var(--color-danger)]">
+          ✕ Failed
         </span>
       )}
     </div>

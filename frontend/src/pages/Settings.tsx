@@ -122,7 +122,9 @@ export function Settings({ onClose, onLogout, embedded }: Props) {
             {gh.fetched_at ? ` · ${new Date(gh.fetched_at).toLocaleString()}` : ''}
           </p>
         ) : (
-          <p className="text-xs text-amber-700">No cache yet — set username and update.</p>
+          <p className="text-xs text-[var(--color-warn)]">
+            No cache yet — set GitHub username above, save, then update.
+          </p>
         )}
         <button
           type="button"

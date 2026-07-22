@@ -9,6 +9,30 @@ export function setToken(t: string | null) {
   else localStorage.removeItem('token')
 }
 
+/** Pull human message from FastAPI-style JSON or plain text. */
+export function formatApiError(text: string, fallback = 'Request failed'): string {
+  const raw = (text || '').trim()
+  if (!raw) return fallback
+  try {
+    const j = JSON.parse(raw) as { detail?: unknown }
+    const d = j.detail
+    if (typeof d === 'string') return d
+    if (Array.isArray(d)) {
+      return d
+        .map((x) =>
+          typeof x === 'object' && x && 'msg' in x
+            ? String((x as { msg: string }).msg)
+            : String(x),
+        )
+        .filter(Boolean)
+        .join('; ') || fallback
+    }
+  } catch {
+    /* plain text */
+  }
+  return raw.length > 280 ? `${raw.slice(0, 280)}…` : raw
+}
+
 export async function api<T>(
   path: string,
   opts: RequestInit = {},
@@ -22,7 +46,7 @@ export async function api<T>(
   const res = await fetch(`${API}/api/v1${path}`, { ...opts, headers })
   if (!res.ok) {
     const text = await res.text()
-    throw new Error(text || res.statusText)
+    throw new Error(formatApiError(text, res.statusText || 'Request failed'))
   }
   if (res.status === 204) return undefined as T
   return res.json() as Promise<T>
@@ -33,7 +57,9 @@ async function fetchBlob(path: string): Promise<Blob> {
   const t = token()
   if (t) headers.Authorization = `Bearer ${t}`
   const res = await fetch(`${API}/api/v1${path}`, { headers })
-  if (!res.ok) throw new Error((await res.text()) || res.statusText)
+  if (!res.ok) {
+    throw new Error(formatApiError(await res.text(), res.statusText || 'Request failed'))
+  }
   return res.blob()
 }
 
