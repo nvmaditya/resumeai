@@ -143,17 +143,22 @@ class TectonicCompiler:
             import tempfile
 
             tmp = tempfile.mkdtemp(prefix="resumeai-tex-")
-            work = Path(tmp)
+            work = Path(tmp).resolve()
         else:
-            work = Path(work_dir)
+            work = Path(work_dir).resolve()
             work.mkdir(parents=True, exist_ok=True)
 
+        # Always use basename + absolute cwd. Passing a relative path as the
+        # tectonic input while cwd=work makes tectonic look for work/work/main.tex.
         tex_path = work / "main.tex"
-        tex_path.write_text(source, encoding="utf-8")
+        tex_path.write_text(source, encoding="utf-8", newline="\n")
+        if not tex_path.is_file():
+            return self._fallback(title, track, latex, structured, f"failed to write {tex_path}")
+
         try:
             proc = subprocess.run(
-                [str(self.binary), str(tex_path)],
-                cwd=work,
+                [str(self.binary), "main.tex"],
+                cwd=str(work),
                 capture_output=True,
                 text=True,
                 timeout=self.timeout_s,
@@ -170,7 +175,13 @@ class TectonicCompiler:
 
         if proc.returncode != 0 or not pdf_path.exists():
             err = (proc.stderr or proc.stdout or "compile failed")[-2000:]
-            return self._fallback(title, track, latex, structured, err)
+            return self._fallback(
+                title,
+                track,
+                latex,
+                structured,
+                f"cwd={work} exists={tex_path.exists()} {err}",
+            )
 
         data = pdf_path.read_bytes()
         synctex = work / "main.synctex.gz"
@@ -182,10 +193,10 @@ class TectonicCompiler:
             "pdf_bytes": data,
             "bytes": len(data),
             "engine": "tectonic",
-            "work_dir": str(work.resolve()),
-            "tex_path": str(tex_path.resolve()),
-            "pdf_path": str(pdf_path.resolve()),
-            "synctex_path": str(synctex.resolve()) if synctex.exists() else None,
+            "work_dir": str(work),
+            "tex_path": str(tex_path),
+            "pdf_path": str(pdf_path),
+            "synctex_path": str(synctex) if synctex.exists() else None,
             "synctex": synctex.exists(),
         }
 
