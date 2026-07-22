@@ -6,6 +6,7 @@ import {
   fetchPdfBytes,
   type Job,
   type LatexVersion,
+  type LintDiagnostic,
   type Resume,
 } from '../api/client'
 import { ProgressStepper } from '../components/ProgressStepper'
@@ -53,6 +54,9 @@ export function ResumeEditor() {
   const [engine, setEngine] = useState('')
   const [commitMsg, setCommitMsg] = useState('')
   const [versions, setVersions] = useState<LatexVersion[]>([])
+  const [tagsText, setTagsText] = useState('')
+  const [linting, setLinting] = useState(false)
+  const [diagnostics, setDiagnostics] = useState<LintDiagnostic[]>([])
   const compilingRef = useRef(false)
 
   async function load() {
@@ -62,6 +66,7 @@ export function ResumeEditor() {
     setLatex(r.latex_body || '')
     setLatexBackup(r.latex_body || '')
     setStructured(fromApi(r.structured_json as Record<string, unknown>))
+    setTagsText((r.tags || []).join(', '))
     setDirty(false)
   }
 
@@ -71,21 +76,50 @@ export function ResumeEditor() {
     setHasPdf(false)
   }, [id])
 
+  function parseTags(text: string): string[] {
+    return text
+      .split(/[,;]+/)
+      .map((t) => t.trim())
+      .filter(Boolean)
+  }
+
   async function save() {
+    const tags = parseTags(tagsText)
     const body =
       resume?.track === 'latex'
-        ? { title, latex_body: latex }
-        : { title, structured_json: toApi(structured) }
+        ? { title, latex_body: latex, tags }
+        : { title, structured_json: toApi(structured), tags }
     const r = await api<Resume>(`/resumes/${id}`, {
       method: 'PATCH',
       body: JSON.stringify(body),
     })
     setResume(r)
     setTitle(r.title)
+    setTagsText((r.tags || []).join(', '))
     setDirty(false)
     setStatus('Saved')
     toast.push('Saved')
     return r
+  }
+
+  async function runLint() {
+    if (resume?.track !== 'latex') return
+    setLinting(true)
+    try {
+      if (dirty) await save()
+      const out = await api<{ diagnostics: LintDiagnostic[] }>(`/resumes/${id}/lint`, {
+        method: 'POST',
+        body: JSON.stringify({ latex_body: latex, compile: true }),
+      })
+      setDiagnostics(out.diagnostics || [])
+      const n = out.diagnostics?.length ?? 0
+      setStatus(n === 0 ? 'Lint clean' : `Lint: ${n} issue${n === 1 ? '' : 's'}`)
+      toast.push(n === 0 ? 'No lint issues' : `${n} lint issue${n === 1 ? '' : 's'}`)
+    } catch (ex) {
+      toast.push(ex instanceof Error ? ex.message : 'Lint failed')
+    } finally {
+      setLinting(false)
+    }
   }
 
   const compileAndPreview = useCallback(
@@ -95,15 +129,17 @@ export function ResumeEditor() {
       setPreviewBusy(true)
       try {
         if (dirty) {
+          const tags = parseTags(tagsText)
           const body =
             resume?.track === 'latex'
-              ? { title, latex_body: latex }
-              : { title, structured_json: toApi(structured) }
+              ? { title, latex_body: latex, tags }
+              : { title, structured_json: toApi(structured), tags }
           const r = await api<Resume>(`/resumes/${id}`, {
             method: 'PATCH',
             body: JSON.stringify(body),
           })
           setResume(r)
+          setTagsText((r.tags || []).join(', '))
           setDirty(false)
         }
         const out = await api<{
@@ -127,7 +163,7 @@ export function ResumeEditor() {
         compilingRef.current = false
       }
     },
-    [dirty, id, latex, resume?.track, structured, title, toast],
+    [dirty, id, latex, resume?.track, structured, tagsText, title, toast],
   )
 
   useEffect(() => {
@@ -317,6 +353,19 @@ export function ResumeEditor() {
         <span className="chip">{resume.track}</span>
         {engine && <span className="chip">{engine}</span>}
         {dirty && <span className="text-xs text-amber-600">Unsaved</span>}
+        <label className="flex min-w-0 flex-1 items-center gap-1 text-[10px] text-[var(--color-muted)]">
+          Tags
+          <input
+            className="input min-w-0 flex-1 py-0.5 text-[11px]"
+            placeholder="internship, faang, …"
+            value={tagsText}
+            onChange={(e) => {
+              setTagsText(e.target.value)
+              setDirty(true)
+            }}
+            aria-label="Resume tags"
+          />
+        </label>
       </div>
 
       <div className="grid min-h-0 flex-1 grid-cols-1 gap-1.5 xl:grid-cols-5">
@@ -333,6 +382,16 @@ export function ResumeEditor() {
             >
               {previewBusy ? 'Compiling…' : 'Compile'}
             </button>
+            {resume.track === 'latex' && (
+              <button
+                type="button"
+                onClick={() => void runLint()}
+                className="btn btn-secondary w-full py-1.5 text-xs"
+                disabled={linting}
+              >
+                {linting ? 'Linting…' : 'Lint LaTeX'}
+              </button>
+            )}
             <button type="button" onClick={() => void downloadPdf()} className="btn btn-secondary w-full py-1.5 text-xs">
               Download PDF
             </button>
@@ -349,6 +408,42 @@ export function ResumeEditor() {
             </button>
           </div>
           {status && <p className="text-[10px] leading-snug text-[var(--color-soft)]">{status}</p>}
+
+          {diagnostics.length > 0 && (
+            <div className="border-t border-[var(--color-line)] pt-2">
+              <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--color-muted)]">
+                Lint ({diagnostics.length})
+              </p>
+              <ul className="max-h-36 space-y-1 overflow-y-auto">
+                {diagnostics.map((d, i) => (
+                  <li key={`${d.source}-${d.line}-${i}`}>
+                    <button
+                      type="button"
+                      className="w-full rounded bg-[var(--color-panel-2)] px-1.5 py-1 text-left text-[10px] leading-snug hover:ring-1 hover:ring-[var(--color-line)]"
+                      onClick={() => {
+                        if (d.line != null) latexRef.current?.goToLine(d.line)
+                      }}
+                    >
+                      <span
+                        className={
+                          d.severity === 'error'
+                            ? 'text-[var(--color-danger)]'
+                            : 'text-amber-600'
+                        }
+                      >
+                        {d.severity}
+                      </span>
+                      {d.line != null && (
+                        <span className="text-[var(--color-muted)]"> · L{d.line}</span>
+                      )}
+                      <span className="text-[var(--color-muted)]"> · {d.source}</span>
+                      <span className="mt-0.5 block text-[var(--color-soft)]">{d.message}</span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
 
           <div className="border-t border-[var(--color-line)] pt-2">
             <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--color-muted)]">

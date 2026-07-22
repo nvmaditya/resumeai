@@ -10,7 +10,13 @@ const empty: UserProfile = {
   headline: '',
 }
 
-export function Settings() {
+type Props = {
+  onClose?: () => void
+  onLogout?: () => void
+  embedded?: boolean
+}
+
+export function Settings({ onClose, onLogout, embedded }: Props) {
   const toast = useToast()
   const [email, setEmail] = useState('')
   const [profile, setProfile] = useState<UserProfile>(empty)
@@ -73,11 +79,7 @@ export function Settings() {
     }
   }
 
-  function field(
-    key: keyof UserProfile,
-    label: string,
-    placeholder = '',
-  ) {
+  function field(key: keyof UserProfile, label: string, placeholder = '') {
     return (
       <label className="block text-sm">
         <span className="mb-1 block text-[var(--color-muted)]">{label}</span>
@@ -91,9 +93,11 @@ export function Settings() {
     )
   }
 
-  return (
-    <div className="mx-auto max-w-lg space-y-4 p-4">
-      <h1 className="font-display text-xl font-semibold text-[var(--color-text)]">Settings</h1>
+  const body = (
+    <div className="space-y-4">
+      {!embedded && (
+        <h1 className="font-display text-xl font-semibold text-[var(--color-text)]">Settings</h1>
+      )}
       <p className="text-xs text-[var(--color-muted)]">Account: {email || '…'}</p>
 
       <div className="space-y-3 rounded border border-[var(--color-line)] bg-[var(--color-panel)] p-4">
@@ -129,6 +133,37 @@ export function Settings() {
           {refreshing ? 'Updating…' : 'Update GitHub data'}
         </button>
       </div>
+
+      {onLogout && (
+        <div className="border-t border-[var(--color-line)] pt-4">
+          <button type="button" className="btn btn-danger w-full" onClick={onLogout}>
+            Log out
+          </button>
+        </div>
+      )}
+    </div>
+  )
+
+  if (!embedded) {
+    return <div className="mx-auto max-w-lg space-y-4 p-4">{body}</div>
+  }
+
+  return (
+    <div className="flex h-full flex-col">
+      <div className="flex shrink-0 items-center justify-between border-b border-[var(--color-line)] px-4 py-3">
+        <h2 className="font-display text-lg font-semibold">Settings</h2>
+        {onClose && (
+          <button
+            type="button"
+            className="text-sm text-[var(--color-muted)] hover:text-[var(--color-text)]"
+            onClick={onClose}
+            aria-label="Close settings"
+          >
+            ✕
+          </button>
+        )}
+      </div>
+      <div className="min-h-0 flex-1 overflow-y-auto p-4">{body}</div>
     </div>
   )
 }

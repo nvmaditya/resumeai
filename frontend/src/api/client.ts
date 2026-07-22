@@ -86,6 +86,18 @@ export type Resume = {
   latex_body?: string | null
   structured_json?: Record<string, unknown> | null
   template_id?: string | null
+  tags?: string[]
+}
+export type TemplateInfo = {
+  id: string
+  title: string
+  filename: string
+}
+export type LintDiagnostic = {
+  line: number | null
+  severity: string
+  message: string
+  source: string
 }
 export type Job = {
   id: string

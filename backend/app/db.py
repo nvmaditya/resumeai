@@ -25,6 +25,11 @@ def _ensure_sqlite_columns() -> None:
         if "profile_json" not in cols:
             conn.execute(text("ALTER TABLE user ADD COLUMN profile_json JSON"))
             conn.commit()
+        rrows = conn.execute(text("PRAGMA table_info(resume)")).fetchall()
+        rcols = {r[1] for r in rrows}
+        if "tags" not in rcols:
+            conn.execute(text("ALTER TABLE resume ADD COLUMN tags JSON"))
+            conn.commit()
 
 
 def get_session() -> Generator[Session, None, None]:

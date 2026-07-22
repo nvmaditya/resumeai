@@ -60,6 +60,7 @@ class ResumeCreate(BaseModel):
     latex_body: Optional[str] = None
     structured_json: Optional[dict[str, Any]] = None
     template_id: Optional[str] = None
+    tags: Optional[list[str]] = None
 
 
 class ResumeUpdate(BaseModel):
@@ -67,6 +68,7 @@ class ResumeUpdate(BaseModel):
     latex_body: Optional[str] = None
     structured_json: Optional[dict[str, Any]] = None
     template_id: Optional[str] = None
+    tags: Optional[list[str]] = None
 
 
 class ResumeOut(BaseModel):
@@ -77,8 +79,31 @@ class ResumeOut(BaseModel):
     latex_body: Optional[str] = None
     structured_json: Optional[dict[str, Any]] = None
     template_id: Optional[str] = None
+    tags: list[str] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime
+
+
+class TemplateOut(BaseModel):
+    id: str
+    title: str
+    filename: str
+
+
+class LintRequest(BaseModel):
+    latex_body: Optional[str] = Field(default=None, max_length=500_000)
+    compile: bool = True
+
+
+class LintDiagnostic(BaseModel):
+    line: Optional[int] = None
+    severity: str
+    message: str
+    source: str
+
+
+class LintResponse(BaseModel):
+    diagnostics: list[LintDiagnostic]
 
 
 class JobOut(BaseModel):

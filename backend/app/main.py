@@ -14,6 +14,7 @@ from app.github.stub import StubGitHubClient
 from app.jobs.local import LocalJobRunner
 from app.jobs.router import router as jobs_router
 from app.resumes.router import router as resumes_router
+from app.resumes.router import templates_router
 from app.scoring.engine import build_score_engine
 from app.storage.local import LocalObjectStore
 
@@ -71,6 +72,7 @@ def create_app() -> FastAPI:
     api = "/api/v1"
     app.include_router(auth_router, prefix=api)
     app.include_router(resumes_router, prefix=api)
+    app.include_router(templates_router, prefix=api)
     app.include_router(jobs_router, prefix=api)
 
     @app.get(f"{api}/health")

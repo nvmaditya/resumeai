@@ -30,6 +30,7 @@ class Resume(SQLModel, table=True):
     latex_key: Optional[str] = None
     structured_json: Optional[dict[str, Any]] = Field(default=None, sa_column=Column(JSON))
     template_id: Optional[str] = None
+    tags: Optional[list[str]] = Field(default=None, sa_column=Column(JSON))
     created_at: datetime = Field(default_factory=_utcnow)
     updated_at: datetime = Field(default_factory=_utcnow)
 

@@ -5,7 +5,6 @@ import { Login } from './pages/Login'
 import { Register } from './pages/Register'
 import { ResumeEditor } from './pages/ResumeEditor'
 import { ResumeList } from './pages/ResumeList'
-import { Settings } from './pages/Settings'
 
 function RequireAuth({ children }: { children: ReactNode }) {
   const t = localStorage.getItem('token')
@@ -28,7 +27,7 @@ export default function App() {
       >
         <Route index element={<ResumeList />} />
         <Route path="resumes/:id" element={<ResumeEditor />} />
-        <Route path="settings" element={<Settings />} />
+        <Route path="settings" element={<Navigate to="/?settings=1" replace />} />
       </Route>
     </Routes>
   )

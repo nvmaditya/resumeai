@@ -8,21 +8,28 @@ from sqlmodel import Session, select
 from app.db import get_session
 from app.deps import get_current_user, get_store
 from app.models import Resume, ScoreJob, User
+from app.latex_lint import lint_latex
+from app.resumes.tags import normalize_tags
 from app.schemas import (
     ApplyEditRequest,
     ChatRequest,
     ChatResponse,
     JobOut,
+    LintRequest,
+    LintResponse,
     ResumeCreate,
     ResumeOut,
     ResumeUpdate,
     ScoreRequest,
+    TemplateOut,
     VersionCommitRequest,
     VersionOut,
 )
 from app.storage.protocol import ObjectStore
+from app.templates_catalog import list_templates, load_template_body
 
 router = APIRouter(prefix="/resumes", tags=["resumes"])
+templates_router = APIRouter(prefix="/templates", tags=["templates"])
 
 
 def _latex_key(user_id: str, resume_id: str) -> str:
@@ -50,6 +57,7 @@ def _to_out(resume: Resume, store: ObjectStore) -> ResumeOut:
         latex_body=body,
         structured_json=resume.structured_json,
         template_id=resume.template_id,
+        tags=list(resume.tags or []),
         created_at=resume.created_at,
         updated_at=resume.updated_at,
     )
@@ -75,6 +83,16 @@ def list_resumes(
     return [_to_out(r, store) for r in rows]
 
 
+@templates_router.get("", response_model=list[TemplateOut])
+def get_templates(
+    user: User = Depends(get_current_user),
+) -> list[TemplateOut]:
+    _ = user
+    return [
+        TemplateOut(id=t.id, title=t.title, filename=t.filename) for t in list_templates()
+    ]
+
+
 @router.post("", response_model=ResumeOut, status_code=status.HTTP_201_CREATED)
 def create_resume(
     body: ResumeCreate,
@@ -82,23 +100,41 @@ def create_resume(
     session: Session = Depends(get_session),
     store: ObjectStore = Depends(get_store),
 ) -> ResumeOut:
+    tags = normalize_tags(body.tags)
+    track = body.track
+    latex_body = body.latex_body
+    template_id = body.template_id
     structured = None
-    if body.track == "structured":
+
+    if template_id:
+        try:
+            latex_body = load_template_body(template_id)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+            ) from exc
+        track = "latex"
+        if not body.title or body.title in ("Untitled Resume", "Structured resume"):
+            # client may send generic title; keep if custom
+            pass
+
+    if track == "structured":
         structured = body.structured_json or _empty_structured()
     resume = Resume(
         user_id=user.id,
         title=body.title,
-        track=body.track,
+        track=track,
         structured_json=structured,
-        template_id=body.template_id,
+        template_id=template_id,
+        tags=tags,
     )
     session.add(resume)
     session.commit()
     session.refresh(resume)
 
-    if body.track == "latex":
+    if track == "latex":
         key = _latex_key(user.id, resume.id)
-        store.put(key, (body.latex_body or "% Resume\n").encode("utf-8"))
+        store.put(key, (latex_body or "% Resume\n").encode("utf-8"))
         resume.latex_key = key
         resume.updated_at = datetime.now(timezone.utc)
         session.add(resume)
@@ -118,6 +154,48 @@ def get_resume(
     return _to_out(_load_owned(session, user, resume_id), store)
 
 
+@router.post("/{resume_id}/lint", response_model=LintResponse)
+def lint_resume(
+    resume_id: str,
+    body: LintRequest,
+    request: Request,
+    user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+    store: ObjectStore = Depends(get_store),
+) -> LintResponse:
+    resume = _load_owned(session, user, resume_id)
+    source = body.latex_body
+    if source is None:
+        if resume.latex_key and store.exists(resume.latex_key):
+            source = store.get(resume.latex_key).decode("utf-8", errors="replace")
+        else:
+            source = ""
+    from app.compile.tectonic import resolve_tectonic
+
+    settings = request.app.state  # type: ignore[attr-defined]
+    # tectonic path from compiler binary if present
+    binary = None
+    if body.compile:
+        compiler = getattr(settings, "compiler", None)
+        bin_path = getattr(compiler, "binary", None)
+        if bin_path is not None:
+            binary = bin_path
+        else:
+            binary = resolve_tectonic()
+    diags = lint_latex(source, run_compile=body.compile, tectonic_binary=binary)
+    return LintResponse(
+        diagnostics=[
+            {
+                "line": d.line,
+                "severity": d.severity,
+                "message": d.message,
+                "source": d.source,
+            }
+            for d in diags
+        ]
+    )
+
+
 @router.patch("/{resume_id}", response_model=ResumeOut)
 def update_resume(
     resume_id: str,
@@ -131,6 +209,8 @@ def update_resume(
         resume.title = body.title
     if body.template_id is not None:
         resume.template_id = body.template_id
+    if body.tags is not None:
+        resume.tags = normalize_tags(body.tags)
     if body.structured_json is not None:
         resume.structured_json = body.structured_json
     if body.latex_body is not None:
