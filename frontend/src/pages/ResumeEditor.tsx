@@ -325,36 +325,6 @@ export function ResumeEditor() {
             <button type="button" onClick={() => void save()} className="btn btn-secondary w-full py-1.5 text-xs">
               Save
             </button>
-            <div className="flex gap-1">
-              <input
-                className="input min-w-0 flex-1 py-1 text-[10px]"
-                placeholder="Commit message"
-                value={commitMsg}
-                onChange={(e) => setCommitMsg(e.target.value)}
-                maxLength={200}
-              />
-              <button type="button" className="btn btn-secondary py-1 text-[10px]" onClick={() => void commitVersion()}>
-                Commit
-              </button>
-            </div>
-            {versions.length > 0 && (
-              <select
-                className="input py-1 text-[10px]"
-                defaultValue=""
-                onChange={(e) => {
-                  const v = e.target.value
-                  e.target.value = ''
-                  if (v) void restoreVersion(v)
-                }}
-              >
-                <option value="">Restore version…</option>
-                {versions.map((v) => (
-                  <option key={v.id} value={v.id}>
-                    {(v.message || 'checkpoint').slice(0, 40)} · {new Date(v.created_at).toLocaleString()}
-                  </option>
-                ))}
-              </select>
-            )}
             <button
               type="button"
               onClick={() => void compileAndPreview()}
@@ -379,6 +349,70 @@ export function ResumeEditor() {
             </button>
           </div>
           {status && <p className="text-[10px] leading-snug text-[var(--color-soft)]">{status}</p>}
+
+          <div className="border-t border-[var(--color-line)] pt-2">
+            <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--color-muted)]">
+              Version history
+            </p>
+            <p className="mb-1 text-[10px] text-[var(--color-muted)]">
+              Snapshot LaTeX with a message (like a commit). Restore anytime.
+            </p>
+            <div className="flex gap-1">
+              <input
+                className="input min-w-0 flex-1 py-1 text-[11px]"
+                placeholder="Commit message"
+                value={commitMsg}
+                onChange={(e) => setCommitMsg(e.target.value)}
+                maxLength={200}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') void commitVersion()
+                }}
+              />
+              <button
+                type="button"
+                className="btn btn-secondary shrink-0 py-1 text-[11px]"
+                onClick={() => void commitVersion()}
+              >
+                Commit
+              </button>
+            </div>
+            {versions.length === 0 ? (
+              <p className="mt-1.5 text-[10px] text-[var(--color-soft)]">
+                No versions yet — commit to save a checkpoint.
+              </p>
+            ) : (
+              <ul className="mt-1.5 max-h-40 space-y-1 overflow-y-auto">
+                {versions.map((v) => (
+                  <li
+                    key={v.id}
+                    className="flex items-start justify-between gap-1 rounded bg-[var(--color-panel-2)] px-1.5 py-1"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-[11px] font-medium text-[var(--color-text)]" title={v.message}>
+                        {v.message || 'checkpoint'}
+                      </p>
+                      <p className="text-[10px] text-[var(--color-muted)]">
+                        {new Date(v.created_at).toLocaleString()}
+                        {v.size != null ? ` · ${v.size} B` : ''}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      className="btn btn-secondary shrink-0 py-0.5 text-[10px]"
+                      title="Replace current source with this version"
+                      onClick={() => {
+                        if (confirm(`Restore version “${(v.message || 'checkpoint').slice(0, 60)}”?`)) {
+                          void restoreVersion(v.id)
+                        }
+                      }}
+                    >
+                      Restore
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
 
           <div className="border-t border-[var(--color-line)] pt-2">
             <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--color-muted)]">
