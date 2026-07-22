@@ -19,6 +19,7 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setenv("DATA_DIR", str(data))
     monkeypatch.setenv("JWT_SECRET", "test-secret")
     monkeypatch.setenv("SCORE_BACKEND", "stub")
+    monkeypatch.setenv("COACH_BACKEND", "stub")  # deterministic; do not hit live Ollama
 
     # Re-import app with fresh settings/engine
     import app.config as config_mod

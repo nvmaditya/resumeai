@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Install git pre-commit hook that runs scripts/check_compile_sample.py."""
+"""Install git pre-commit hook: pytest + compile sample check (fast gate).
+
+Full done-gate (includes frontend build):
+  backend\\.venv\\Scripts\\python.exe scripts\\verify_before_done.py
+"""
 
 from __future__ import annotations
 
@@ -9,7 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 HOOK = ROOT / ".git" / "hooks" / "pre-commit"
 
 HOOK_BODY = r'''#!/bin/sh
-# ResumeAI: compile sample LaTeX + ensure PDF has no raw LaTeX headers
+# ResumeAI: pre-commit = pytest + sample LaTeX compile quality (--fast skips frontend)
 ROOT="$(git rev-parse --show-toplevel)"
 PY="$ROOT/backend/.venv/Scripts/python.exe"
 if [ ! -f "$PY" ]; then
@@ -18,7 +22,7 @@ fi
 if [ ! -f "$PY" ]; then
   PY="python"
 fi
-exec "$PY" "$ROOT/scripts/check_compile_sample.py"
+exec "$PY" "$ROOT/scripts/verify_before_done.py" --fast
 '''
 
 
@@ -33,7 +37,8 @@ def main() -> int:
     except OSError:
         pass
     print(f"installed: {HOOK}")
-    print("manual: backend\\.venv\\Scripts\\python.exe scripts\\check_compile_sample.py")
+    print("pre-commit: verify_before_done.py --fast  (pytest + compile sample)")
+    print("before done: backend\\.venv\\Scripts\\python.exe scripts\\verify_before_done.py")
     return 0
 
 

@@ -21,9 +21,35 @@ Keep history **version-wise** so each meaningful slice is a tag + push.
 | Bugfix / polish within slice | patch | `v0.2.1` |
 | Breaking API/contract | minor until 1.0 | `v0.3.0` |
 
+### Done gate (required — never claim done without this)
+
+Before saying work is complete, fixed, or ready to ship, **run and pass**:
+
+```powershell
+# from repo root
+backend\.venv\Scripts\python.exe scripts\verify_before_done.py
+```
+
+That script runs, in order:
+
+| Step | What |
+|------|------|
+| 1 | `pytest tests/` (backend) |
+| 2 | `scripts/check_compile_sample.py` (tectonic sample → no raw LaTeX in PDF) |
+| 3 | `npm run build` (frontend) |
+
+Pre-commit (faster; skips frontend build):
+
+```powershell
+backend\.venv\Scripts\python.exe scripts\install_hooks.py   # once per clone
+# hook runs: verify_before_done.py --fast
+```
+
+**No completion claims without fresh exit code 0 from the full gate.**
+
 ### Agent checklist after implementable work
 
-1. Run relevant tests (`backend`: `pytest`; `frontend`: `npm run build`).
+1. Pass the **done gate** above (`scripts/verify_before_done.py`).
 2. Commit with conventional message (`feat:`, `fix:`, `docs:`, `chore:`).
 3. Tag if this is a shippable slice:
    ```bash

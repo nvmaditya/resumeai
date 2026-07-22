@@ -19,3 +19,4 @@ backend/bin/tectonic
 !backend/bin/README.md
 
 backend/cache/
+handoff.md

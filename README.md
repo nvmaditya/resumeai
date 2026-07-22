@@ -10,13 +10,24 @@ One shot (two windows):
 .\start.ps1
 ```
 
-### Compile-quality hook (sample LaTeX → PDF text check)
+### Done gate + hooks
 
-Compiles `backend/tests/fixtures/ai_eng_resume.tex` via the real compiler, extracts PDF text, fails if raw LaTeX headers remain (`\documentclass`, `\begin{document}`, etc.):
+Before claiming work done (agents **must**):
+
+```powershell
+backend\.venv\Scripts\python.exe scripts\verify_before_done.py
+# → pytest + sample LaTeX compile check + frontend build
+```
+
+Compile-quality alone (sample fixture → PDF text must not contain raw LaTeX headers):
 
 ```powershell
 backend\.venv\Scripts\python.exe scripts\check_compile_sample.py
-# install as git pre-commit:
+```
+
+Git pre-commit (pytest + compile check; skips frontend build):
+
+```powershell
 backend\.venv\Scripts\python.exe scripts\install_hooks.py
 ```
 

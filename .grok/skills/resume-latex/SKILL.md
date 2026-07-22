@@ -55,11 +55,19 @@ Desktop: **1/5** actions/score/coach · **2/5** editor · **2/5** PDF preview.
 
 - CodeMirror LaTeX highlighting (not plain textarea).
 - pdf.js canvas preview (not browser `<iframe>` PDF chrome).
-- Click PDF text → search/highlight matching source in editor (string match MVP).
+- **SyncTeX** (official `synctex` CLI — do not hand-parse `.synctex.gz`):
+  - Compile injects `\synctex=1`; work dir keeps `main.tex` / `main.pdf` / `main.synctex.gz`
+  - Inverse: `POST .../synctex/edit` `{page,x,y}` → line/column (Ctrl+Click PDF)
+  - Forward: `POST .../synctex/view` `{line,column}` → page/x/y (Ctrl+Click editor or Jump to PDF)
+  - Requires `synctex` on PATH (MiKTeX/TeX Live)
 
 ## Tests to run after LaTeX/coach changes
 
 ```powershell
+# Full done gate (required before claiming done — see AGENTS.md)
+backend\.venv\Scripts\python.exe scripts\verify_before_done.py
+
+# Targeted subset while iterating:
 cd backend
 $env:PYTHONPATH = (Get-Location).Path
 .\.venv\Scripts\python.exe -m pytest tests/test_tectonic.py tests/test_pdf_layout.py tests/test_chat_safety.py -v
