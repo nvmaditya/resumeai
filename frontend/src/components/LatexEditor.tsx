@@ -28,6 +28,9 @@ const latexHighlight = HighlightStyle.define([
 export type LatexEditorHandle = {
   highlightRange: (from: number, to: number) => void
   findAndHighlight: (query: string) => boolean
+  /** 1-based line, 0-based column (SyncTeX) */
+  goToLine: (line: number, column?: number) => void
+  getCursor: () => { line: number; column: number }
   getValue: () => string
 }
 
@@ -88,6 +91,23 @@ export function LatexEditor({ value, onChange, editorRef }: Props) {
 
     const handle: LatexEditorHandle = {
       getValue: () => view.state.doc.toString(),
+      getCursor: () => {
+        const pos = view.state.selection.main.head
+        const line = view.state.doc.lineAt(pos)
+        return { line: line.number, column: pos - line.from }
+      },
+      goToLine: (line, column = 0) => {
+        const doc = view.state.doc
+        const ln = Math.max(1, Math.min(line, doc.lines))
+        const lineObj = doc.line(ln)
+        const col = Math.max(0, Math.min(column, lineObj.length))
+        const pos = lineObj.from + col
+        view.dispatch({
+          selection: { anchor: pos, head: Math.min(pos + 1, lineObj.to) },
+          scrollIntoView: true,
+        })
+        view.focus()
+      },
       highlightRange: (from, to) => {
         const f = Math.max(0, Math.min(from, view.state.doc.length))
         const t = Math.max(f, Math.min(to, view.state.doc.length))
@@ -102,7 +122,6 @@ export function LatexEditor({ value, onChange, editorRef }: Props) {
         if (needle.length < 2) return false
         const doc = view.state.doc.toString()
         const lower = doc.toLowerCase()
-        // try progressively shorter prefixes
         for (const n of [needle, needle.slice(0, 60), needle.slice(0, 30), needle.slice(0, 16)]) {
           if (n.length < 2) continue
           const idx = lower.indexOf(n.toLowerCase())
@@ -114,6 +133,18 @@ export function LatexEditor({ value, onChange, editorRef }: Props) {
         return false
       },
     }
+
+    // Ctrl/Cmd+Click in editor → forward search (custom event)
+    view.dom.addEventListener('click', (ev) => {
+      if (!(ev.ctrlKey || ev.metaKey)) return
+      const cur = handle.getCursor()
+      host.current?.dispatchEvent(
+        new CustomEvent('synctex-forward', {
+          bubbles: true,
+          detail: { line: cur.line, column: cur.column },
+        }),
+      )
+    })
     if (editorRef) editorRef.current = handle
 
     return () => {

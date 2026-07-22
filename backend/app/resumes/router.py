@@ -155,6 +155,14 @@ def delete_resume(
     session.commit()
 
 
+def _work_dir(data_dir: str, user_id: str, resume_id: str):
+    from pathlib import Path
+
+    p = Path(data_dir) / "users" / user_id / "resumes" / resume_id / "work"
+    p.mkdir(parents=True, exist_ok=True)
+    return p
+
+
 @router.post("/{resume_id}/compile")
 def compile_resume(
     resume_id: str,
@@ -163,24 +171,31 @@ def compile_resume(
     session: Session = Depends(get_session),
     store: ObjectStore = Depends(get_store),
 ) -> dict:
+    from app.config import get_settings
+
     resume = _load_owned(session, user, resume_id)
     compiler = request.app.state.compiler
     latex = None
     if resume.latex_key and store.exists(resume.latex_key):
         latex = store.get(resume.latex_key).decode("utf-8", errors="replace")
+    work = _work_dir(get_settings().data_dir, user.id, resume.id)
     result = compiler.compile(
         title=resume.title or "Resume",
         track=resume.track,
         latex=latex,
         structured=resume.structured_json,
+        work_dir=work,
     )
     pdf_key = f"users/{user.id}/resumes/{resume.id}/out.pdf"
     if result.get("pdf_bytes"):
         store.put(pdf_key, result["pdf_bytes"])
+        # also keep a copy next to synctex for CLI
+        (work / "main.pdf").write_bytes(result["pdf_bytes"])
         result = {
             **{k: v for k, v in result.items() if k != "pdf_bytes"},
             "pdf_key": pdf_key,
             "engine": result.get("engine", "layout"),
+            "synctex": bool(result.get("synctex")),
             "download_path": f"/api/v1/resumes/{resume.id}/pdf",
             "preview_path": f"/api/v1/resumes/{resume.id}/pdf?inline=1",
         }
@@ -218,6 +233,64 @@ def download_pdf(
             "Content-Length": str(len(data)),
         },
     )
+
+
+@router.post("/{resume_id}/synctex/edit")
+def synctex_edit(
+    resume_id: str,
+    body: dict,
+    user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+) -> dict:
+    """Inverse search: PDF click (page,x,y top-left bp) → tex line/column via official synctex CLI."""
+    from app.compile.synctex import inverse_search
+    from app.config import get_settings
+
+    resume = _load_owned(session, user, resume_id)
+    work = _work_dir(get_settings().data_dir, user.id, resume.id)
+    pdf_path = work / "main.pdf"
+    if not pdf_path.exists():
+        raise HTTPException(status_code=404, detail="Compile first (no work PDF for SyncTeX)")
+    try:
+        page = int(body.get("page") or 1)
+        x = float(body.get("x") or 0)
+        y = float(body.get("y") or 0)
+        hit = inverse_search(pdf_path=pdf_path, page=page, x=x, y=y, work_dir=work)
+        return hit
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/{resume_id}/synctex/view")
+def synctex_view(
+    resume_id: str,
+    body: dict,
+    user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+) -> dict:
+    """Forward search: editor line/column → PDF page/x/y via official synctex CLI."""
+    from app.compile.synctex import forward_search
+    from app.config import get_settings
+
+    resume = _load_owned(session, user, resume_id)
+    work = _work_dir(get_settings().data_dir, user.id, resume.id)
+    pdf_path = work / "main.pdf"
+    tex_path = work / "main.tex"
+    if not pdf_path.exists() or not tex_path.exists():
+        raise HTTPException(status_code=404, detail="Compile first (no SyncTeX work files)")
+    try:
+        line = int(body.get("line") or 1)
+        column = int(body.get("column") or 0)
+        hit = forward_search(
+            tex_path=tex_path,
+            pdf_path=pdf_path,
+            line=line,
+            column=column,
+            work_dir=work,
+        )
+        return hit
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.post("/{resume_id}/extract")

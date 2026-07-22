@@ -3,7 +3,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom'
 import { api, downloadFile, fetchPdfBytes, type Job, type Resume } from '../api/client'
 import { ProgressStepper } from '../components/ProgressStepper'
 import { LatexEditor, type LatexEditorHandle } from '../components/LatexEditor'
-import { PdfPreview } from '../components/PdfPreview'
+import { PdfPreview, type PdfHighlight } from '../components/PdfPreview'
 import {
   StructuredForm,
   fromApi,
@@ -45,6 +45,8 @@ export function ResumeEditor() {
   const [pdfData, setPdfData] = useState<ArrayBuffer | null>(null)
   const [previewBusy, setPreviewBusy] = useState(false)
   const [engine, setEngine] = useState('')
+  const [pdfHighlight, setPdfHighlight] = useState<PdfHighlight | null>(null)
+  const [synctexOn, setSynctexOn] = useState(false)
   const compilingRef = useRef(false)
 
   async function load() {
@@ -102,13 +104,17 @@ export function ResumeEditor() {
           message: string
           bytes?: number
           engine?: string
+          synctex?: boolean
         }>(`/resumes/${id}/compile`, { method: 'POST' })
         setEngine(out.engine || '')
+        setSynctexOn(Boolean(out.synctex))
         const bytes = await fetchPdfBytes(`/resumes/${id}/pdf?inline=1`)
         setPdfData(bytes)
         setHasPdf(true)
         setStatus(
-          `${out.message}${out.bytes ? ` · ${out.bytes} B` : ''}${out.engine ? ` · ${out.engine}` : ''}`,
+          `${out.message}${out.bytes ? ` · ${out.bytes} B` : ''}${out.engine ? ` · ${out.engine}` : ''}${
+            out.synctex ? ' · SyncTeX' : ''
+          }`,
         )
         if (!opts?.quiet) toast.push(out.engine === 'tectonic' ? 'TeX preview ready' : 'Preview ready')
       } catch (ex) {
@@ -230,10 +236,42 @@ export function ResumeEditor() {
     nav('/')
   }
 
-  function onPdfTextClick(text: string) {
-    const ok = latexRef.current?.findAndHighlight(text)
-    if (ok) toast.push('Jumped to source')
-    else toast.push('No matching source text')
+  async function onPdfCtrlClick(pos: { page: number; x: number; y: number }) {
+    try {
+      const hit = await api<{ line: number; column: number; input?: string }>(
+        `/resumes/${id}/synctex/edit`,
+        {
+          method: 'POST',
+          body: JSON.stringify({ page: pos.page, x: pos.x, y: pos.y }),
+        },
+      )
+      latexRef.current?.goToLine(hit.line, hit.column >= 0 ? hit.column : 0)
+      toast.push(`SyncTeX → L${hit.line}`)
+    } catch (ex) {
+      toast.push(ex instanceof Error ? ex.message : 'SyncTeX inverse failed — recompile')
+    }
+  }
+
+  async function forwardSearch(line: number, column: number) {
+    try {
+      const hit = await api<{ page: number; x: number; y: number; width?: number; height?: number }>(
+        `/resumes/${id}/synctex/view`,
+        {
+          method: 'POST',
+          body: JSON.stringify({ line, column }),
+        },
+      )
+      setPdfHighlight({
+        page: hit.page,
+        x: hit.x,
+        y: hit.y,
+        width: hit.width,
+        height: hit.height,
+      })
+      toast.push(`SyncTeX → PDF p.${hit.page}`)
+    } catch (ex) {
+      toast.push(ex instanceof Error ? ex.message : 'SyncTeX forward failed — recompile')
+    }
   }
 
   if (!resume) {
@@ -264,7 +302,19 @@ export function ResumeEditor() {
         />
         <span className="chip">{resume.track}</span>
         {engine && <span className="chip">{engine}</span>}
+        {synctexOn && <span className="chip">SyncTeX</span>}
         {dirty && <span className="text-xs text-amber-600">Unsaved</span>}
+        <button
+          type="button"
+          className="btn btn-secondary py-0.5 text-[10px]"
+          title="Forward search (editor cursor → PDF)"
+          onClick={() => {
+            const c = latexRef.current?.getCursor()
+            if (c) void forwardSearch(c.line, c.column)
+          }}
+        >
+          Jump to PDF
+        </button>
       </div>
 
       <div className="grid min-h-0 flex-1 grid-cols-1 gap-1.5 xl:grid-cols-5">
@@ -402,14 +452,26 @@ export function ResumeEditor() {
           </div>
           <div className="min-h-0 flex-1">
             {resume.track === 'latex' ? (
-              <LatexEditor
-                value={latex}
-                onChange={(v) => {
-                  setLatex(v)
-                  setDirty(true)
+              <div
+                className="h-full"
+                ref={(node) => {
+                  if (!node || (node as HTMLElement & { _sx?: boolean })._sx) return
+                  ;(node as HTMLElement & { _sx?: boolean })._sx = true
+                  node.addEventListener('synctex-forward', ((ev: Event) => {
+                    const d = (ev as CustomEvent).detail as { line: number; column: number }
+                    void forwardSearch(d.line, d.column)
+                  }) as EventListener)
                 }}
-                editorRef={latexRef}
-              />
+              >
+                <LatexEditor
+                  value={latex}
+                  onChange={(v) => {
+                    setLatex(v)
+                    setDirty(true)
+                  }}
+                  editorRef={latexRef}
+                />
+              </div>
             ) : (
               <div className="h-full overflow-auto bg-[var(--color-panel)] p-2">
                 <StructuredForm
@@ -426,7 +488,12 @@ export function ResumeEditor() {
 
         {/* 2/5 pdf.js preview */}
         <section className="flex min-h-0 flex-col overflow-hidden rounded border border-[var(--color-line)] xl:col-span-2">
-          <PdfPreview data={pdfData} busy={previewBusy} onTextClick={onPdfTextClick} />
+          <PdfPreview
+            data={pdfData}
+            busy={previewBusy}
+            highlight={pdfHighlight}
+            onCtrlClick={(pos) => void onPdfCtrlClick(pos)}
+          />
         </section>
       </div>
     </div>

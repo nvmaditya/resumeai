@@ -1,14 +1,14 @@
-"""Real LaTeX compile via tectonic (Overleaf-class engine)."""
+"""Real LaTeX compile via tectonic with SyncTeX artifacts."""
 
 from __future__ import annotations
 
 import shutil
 import subprocess
-import tempfile
 from pathlib import Path
 from typing import Any
 
 from app.compile.pdf_layout import render_resume_pdf
+from app.compile.synctex import ensure_synctex_preamble
 
 
 def resolve_tectonic(tectonic_path: str | None = None) -> Path | None:
@@ -34,6 +34,7 @@ def structured_to_tex(title: str, data: dict[str, Any] | None) -> str:
     summary = (basics.get("summary") or "").replace("&", "\\&")
     lines = [
         r"\documentclass[11pt,letterpaper]{article}",
+        r"\synctex=1",
         r"\usepackage[margin=0.75in]{geometry}",
         r"\usepackage[T1]{fontenc}",
         r"\usepackage{lmodern}",
@@ -119,6 +120,7 @@ class TectonicCompiler:
         track: str = "latex",
         latex: str | None = None,
         structured: dict[str, Any] | None = None,
+        work_dir: Path | str | None = None,
         **kwargs: Any,
     ) -> dict[str, Any]:
         tex_bytes = kwargs.get("tex_bytes")
@@ -135,62 +137,57 @@ class TectonicCompiler:
             source = structured_to_tex(title, structured)
         else:
             source = latex or r"\documentclass{article}\begin{document}Empty\end{document}"
+        source = ensure_synctex_preamble(source)
 
-        with tempfile.TemporaryDirectory(prefix="resumeai-tex-") as tmp:
+        if work_dir is None:
+            import tempfile
+
+            tmp = tempfile.mkdtemp(prefix="resumeai-tex-")
             work = Path(tmp)
-            tex_path = work / "main.tex"
-            tex_path.write_text(source, encoding="utf-8")
-            try:
-                proc = subprocess.run(
-                    [str(self.binary), "-X", "compile", str(tex_path)],
-                    cwd=work,
-                    capture_output=True,
-                    text=True,
-                    timeout=self.timeout_s,
-                )
-            except subprocess.TimeoutExpired:
-                return self._fallback(title, track, latex, structured, "tectonic timeout")
-            except FileNotFoundError:
-                return self._fallback(title, track, latex, structured, "tectonic not found")
+        else:
+            work = Path(work_dir)
+            work.mkdir(parents=True, exist_ok=True)
 
-            pdf_path = work / "main.pdf"
-            # older CLI may write next to cwd with different name
-            if not pdf_path.exists():
-                pdfs = list(work.glob("*.pdf"))
-                pdf_path = pdfs[0] if pdfs else pdf_path
+        tex_path = work / "main.tex"
+        tex_path.write_text(source, encoding="utf-8")
+        try:
+            proc = subprocess.run(
+                [str(self.binary), str(tex_path)],
+                cwd=work,
+                capture_output=True,
+                text=True,
+                timeout=self.timeout_s,
+            )
+        except subprocess.TimeoutExpired:
+            return self._fallback(title, track, latex, structured, "tectonic timeout")
+        except FileNotFoundError:
+            return self._fallback(title, track, latex, structured, "tectonic not found")
 
-            if proc.returncode != 0 or not pdf_path.exists():
-                err = (proc.stderr or proc.stdout or "compile failed")[-2000:]
-                # try plain tectonic main.tex
-                if proc.returncode != 0:
-                    proc2 = subprocess.run(
-                        [str(self.binary), str(tex_path)],
-                        cwd=work,
-                        capture_output=True,
-                        text=True,
-                        timeout=self.timeout_s,
-                    )
-                    pdfs = list(work.glob("*.pdf"))
-                    if proc2.returncode == 0 and pdfs:
-                        data = pdfs[0].read_bytes()
-                        return {
-                            "ok": True,
-                            "message": "compiled with tectonic",
-                            "pdf_bytes": data,
-                            "bytes": len(data),
-                            "engine": "tectonic",
-                        }
-                    err = (proc2.stderr or proc2.stdout or err)[-2000:]
-                return self._fallback(title, track, latex, structured, err)
+        pdf_path = work / "main.pdf"
+        if not pdf_path.exists():
+            pdfs = list(work.glob("*.pdf"))
+            pdf_path = pdfs[0] if pdfs else pdf_path
 
-            data = pdf_path.read_bytes()
-            return {
-                "ok": True,
-                "message": "compiled with tectonic",
-                "pdf_bytes": data,
-                "bytes": len(data),
-                "engine": "tectonic",
-            }
+        if proc.returncode != 0 or not pdf_path.exists():
+            err = (proc.stderr or proc.stdout or "compile failed")[-2000:]
+            return self._fallback(title, track, latex, structured, err)
+
+        data = pdf_path.read_bytes()
+        synctex = work / "main.synctex.gz"
+        if not synctex.exists():
+            synctex = work / "main.synctex"
+        return {
+            "ok": True,
+            "message": "compiled with tectonic (+synctex)",
+            "pdf_bytes": data,
+            "bytes": len(data),
+            "engine": "tectonic",
+            "work_dir": str(work.resolve()),
+            "tex_path": str(tex_path.resolve()),
+            "pdf_path": str(pdf_path.resolve()),
+            "synctex_path": str(synctex.resolve()) if synctex.exists() else None,
+            "synctex": synctex.exists(),
+        }
 
     def _fallback(
         self,
@@ -203,10 +200,11 @@ class TectonicCompiler:
         pdf = render_resume_pdf(title=title, track=track, latex=latex, structured=structured)
         return {
             "ok": True,
-            "message": f"layout fallback (install/fix tectonic for Overleaf-like output): {reason[:300]}",
+            "message": f"layout fallback (no SyncTeX): {reason[:300]}",
             "pdf_bytes": pdf,
             "bytes": len(pdf),
             "engine": "layout",
+            "synctex": False,
         }
 
 
@@ -218,6 +216,7 @@ class LayoutCompiler:
         track: str = "latex",
         latex: str | None = None,
         structured: dict[str, Any] | None = None,
+        work_dir: Path | str | None = None,
         **kwargs: Any,
     ) -> dict[str, Any]:
         tex_bytes = kwargs.get("tex_bytes")
@@ -236,6 +235,8 @@ class LayoutCompiler:
             "pdf_bytes": pdf,
             "bytes": len(pdf),
             "engine": "layout",
+            "synctex": False,
+            "work_dir": str(work_dir) if work_dir else None,
         }
 
 

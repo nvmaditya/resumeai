@@ -1,25 +1,42 @@
 import { useEffect, useRef, useState } from 'react'
 import * as pdfjs from 'pdfjs-dist'
-
-// Vite worker
 import pdfWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
+
 pdfjs.GlobalWorkerOptions.workerSrc = pdfWorker
 
-type Props = {
-  /** PDF as ArrayBuffer or blob URL */
-  data: ArrayBuffer | null
-  onTextClick?: (text: string) => void
-  busy?: boolean
+export type PdfClickPos = {
+  page: number
+  /** SyncTeX: top-left origin, big points (72 dpi) */
+  x: number
+  y: number
+  ctrlKey: boolean
 }
 
-export function PdfPreview({ data, onTextClick, busy }: Props) {
+export type PdfHighlight = {
+  page: number
+  x: number
+  y: number
+  width?: number
+  height?: number
+}
+
+type Props = {
+  data: ArrayBuffer | null
+  busy?: boolean
+  highlight?: PdfHighlight | null
+  onCtrlClick?: (pos: PdfClickPos) => void
+}
+
+export function PdfPreview({ data, busy, highlight, onCtrlClick }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
-  const textLayerRef = useRef<HTMLDivElement>(null)
+  const wrapRef = useRef<HTMLDivElement>(null)
   const [page, setPage] = useState(1)
   const [numPages, setNumPages] = useState(0)
-  const [scale, setScale] = useState(1.15)
+  const [scale, setScale] = useState(1.2)
   const [err, setErr] = useState('')
+  const [pageSize, setPageSize] = useState({ w: 0, h: 0 })
   const pdfRef = useRef<pdfjs.PDFDocumentProxy | null>(null)
+  const viewportRef = useRef<pdfjs.PageViewport | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -45,56 +62,74 @@ export function PdfPreview({ data, onTextClick, busy }: Props) {
   }, [data])
 
   useEffect(() => {
+    if (highlight?.page && highlight.page !== page) {
+      setPage(highlight.page)
+    }
+  }, [highlight, page])
+
+  useEffect(() => {
     let cancelled = false
     async function render() {
       const pdf = pdfRef.current
       const canvas = canvasRef.current
-      const textLayer = textLayerRef.current
       if (!pdf || !canvas || page < 1 || page > pdf.numPages) return
       const p = await pdf.getPage(page)
       if (cancelled) return
       const viewport = p.getViewport({ scale })
+      viewportRef.current = viewport
       const ctx = canvas.getContext('2d')
       if (!ctx) return
       canvas.height = viewport.height
       canvas.width = viewport.width
+      setPageSize({ w: viewport.width, h: viewport.height })
       await p.render({ canvasContext: ctx, viewport, canvas }).promise
 
-      // Text layer for click-to-source
-      if (textLayer) {
-        textLayer.innerHTML = ''
-        textLayer.style.width = `${viewport.width}px`
-        textLayer.style.height = `${viewport.height}px`
-        const textContent = await p.getTextContent()
-        const frag = document.createDocumentFragment()
-        for (const item of textContent.items) {
-          if (!('str' in item) || !item.str) continue
-          const tx = pdfjs.Util.transform(viewport.transform, item.transform)
-          const span = document.createElement('span')
-          span.textContent = item.str
-          span.style.position = 'absolute'
-          span.style.left = `${tx[4]}px`
-          span.style.top = `${tx[5] - item.height * scale}px`
-          span.style.fontSize = `${Math.max(8, item.height * scale)}px`
-          span.style.fontFamily = 'sans-serif'
-          span.style.color = 'transparent'
-          span.style.cursor = 'pointer'
-          span.style.whiteSpace = 'pre'
-          span.title = item.str
-          span.onclick = (ev) => {
-            ev.preventDefault()
-            onTextClick?.(item.str)
-          }
-          frag.appendChild(span)
-        }
-        textLayer.appendChild(frag)
+      // forward-search highlight box
+      if (highlight && highlight.page === page) {
+        // SyncTeX y is from top; canvas y grows downward
+        const pdfH = p.view[3] - p.view[1] // media box height in pt
+        const sx = highlight.x * scale
+        const sy = (pdfH - highlight.y) * scale
+        const w = Math.max(24, (highlight.width || 40) * scale)
+        const h = Math.max(12, (highlight.height || 14) * scale)
+        ctx.save()
+        ctx.strokeStyle = 'rgba(255, 193, 7, 0.95)'
+        ctx.fillStyle = 'rgba(255, 193, 7, 0.25)'
+        ctx.lineWidth = 2
+        ctx.fillRect(sx, sy - h, w, h)
+        ctx.strokeRect(sx, sy - h, w, h)
+        ctx.restore()
       }
     }
     void render()
     return () => {
       cancelled = true
     }
-  }, [data, page, scale, numPages, onTextClick])
+  }, [data, page, scale, numPages, highlight])
+
+  function onCanvasClick(ev: React.MouseEvent<HTMLCanvasElement>) {
+    if (!ev.ctrlKey && !ev.metaKey) return
+    const canvas = canvasRef.current
+    const pdf = pdfRef.current
+    const viewport = viewportRef.current
+    if (!canvas || !pdf || !viewport) return
+    const rect = canvas.getBoundingClientRect()
+    const cssX = ev.clientX - rect.left
+    const cssY = ev.clientY - rect.top
+    // convert to PDF user space (origin bottom-left, points)
+    const [pdfX, pdfY] = viewport.convertToPdfPoint(cssX, cssY)
+    // SyncTeX wants top-left origin in bp
+    void pdf.getPage(page).then((p) => {
+      const pdfH = p.view[3] - p.view[1]
+      const synctexY = pdfH - pdfY
+      onCtrlClick?.({
+        page,
+        x: pdfX,
+        y: synctexY,
+        ctrlKey: true,
+      })
+    })
+  }
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-[#525659]">
@@ -137,18 +172,21 @@ export function PdfPreview({ data, onTextClick, busy }: Props) {
             +
           </button>
         </div>
+        <span className="text-[10px] text-white/50">Ctrl+Click → source</span>
         {busy && <span className="text-amber-300">Updating…</span>}
       </div>
-      <div className="min-h-0 flex-1 overflow-auto p-4">
+      <div ref={wrapRef} className="min-h-0 flex-1 overflow-auto p-4">
         {err && <p className="text-center text-sm text-red-300">{err}</p>}
         {!data && !err && (
-          <p className="text-center text-sm text-white/60">
-            {busy ? 'Rendering…' : 'Compile to preview'}
-          </p>
+          <p className="text-center text-sm text-white/60">{busy ? 'Rendering…' : 'Compile to preview'}</p>
         )}
-        <div className="relative mx-auto w-fit shadow-xl">
-          <canvas ref={canvasRef} className="block bg-white" />
-          <div ref={textLayerRef} className="pointer-events-auto absolute left-0 top-0" />
+        <div className="relative mx-auto w-fit shadow-xl" style={{ width: pageSize.w || undefined }}>
+          <canvas
+            ref={canvasRef}
+            className="block cursor-crosshair bg-white"
+            onClick={onCanvasClick}
+            title="Ctrl+Click for SyncTeX inverse search"
+          />
         </div>
       </div>
     </div>

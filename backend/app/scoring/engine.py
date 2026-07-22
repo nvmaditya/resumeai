@@ -115,9 +115,13 @@ class HiringAgentScoreEngine:
         self.vendor_path = Path(vendor_path)
 
     def run(self, snapshot: dict[str, Any], job_id: str) -> dict[str, Any]:
+        import os
+        from contextlib import contextmanager
+
         t0 = time.perf_counter()
-        if str(self.vendor_path) not in sys.path:
-            sys.path.insert(0, str(self.vendor_path))
+        vendor = str(self.vendor_path.resolve())
+        if vendor not in sys.path:
+            sys.path.insert(0, vendor)
 
         structured = snapshot.get("structured_json")
         latex = snapshot.get("latex_body") or ""
@@ -125,51 +129,63 @@ class HiringAgentScoreEngine:
         github_data: dict[str, Any] = {}
         github_enriched = False
 
-        if github_url:
+        @contextmanager
+        def _vendor_cwd():
+            # hiring-agent TemplateManager loads prompts/templates relative to CWD
+            prev = os.getcwd()
+            os.chdir(vendor)
             try:
-                from github import fetch_and_display_github_info  # type: ignore
-
-                github_data = fetch_and_display_github_info(github_url) or {}
-                github_enriched = bool(github_data.get("profile") or github_data.get("projects"))
-            except Exception as exc:
-                github_data = {"error": str(exc)}
+                yield
+            finally:
+                os.chdir(prev)
 
         try:
-            from evaluator import ResumeEvaluator  # type: ignore
-            from prompt import DEFAULT_MODEL, MODEL_PARAMETERS  # type: ignore
-            from transform import (  # type: ignore
-                convert_github_data_to_text,
-                convert_json_resume_to_text,
-            )
+            with _vendor_cwd():
+                if github_url:
+                    try:
+                        from github import fetch_and_display_github_info  # type: ignore
 
-            if structured:
-                try:
-                    from models import JSONResume  # type: ignore
+                        github_data = fetch_and_display_github_info(github_url) or {}
+                        github_enriched = bool(
+                            github_data.get("profile") or github_data.get("projects")
+                        )
+                    except Exception as exc:
+                        github_data = {"error": str(exc)}
 
-                    resume = JSONResume(**structured)
-                    resume_text = convert_json_resume_to_text(resume)
-                except Exception:
+                from evaluator import ResumeEvaluator  # type: ignore
+                from prompt import DEFAULT_MODEL, MODEL_PARAMETERS  # type: ignore
+                from transform import (  # type: ignore
+                    convert_github_data_to_text,
+                    convert_json_resume_to_text,
+                )
+
+                if structured:
+                    try:
+                        from models import JSONResume  # type: ignore
+
+                        resume = JSONResume(**structured)
+                        resume_text = convert_json_resume_to_text(resume)
+                    except Exception:
+                        resume_text = text
+                else:
                     resume_text = text
-            else:
-                resume_text = text
 
-            if github_enriched:
-                resume_text = resume_text + "\n\n" + convert_github_data_to_text(github_data)
+                if github_enriched:
+                    resume_text = resume_text + "\n\n" + convert_github_data_to_text(github_data)
 
-            if not resume_text.strip():
-                raise ValueError("empty resume text for evaluation")
+                if not resume_text.strip():
+                    raise ValueError("empty resume text for evaluation")
 
-            params = MODEL_PARAMETERS.get(DEFAULT_MODEL, {"temperature": 0.5, "top_p": 0.9})
-            evaluator = ResumeEvaluator(model_name=DEFAULT_MODEL, model_params=params)
-            evaluation = evaluator.evaluate_resume(resume_text)
-            result = _map_evaluation(evaluation, job_id)
-            result["engine"] = "hiring_agent"
-            result["github_enriched"] = github_enriched
-            result["github_url"] = github_url
-            result["duration_ms"] = int((time.perf_counter() - t0) * 1000)
-            return result
+                params = MODEL_PARAMETERS.get(DEFAULT_MODEL, {"temperature": 0.5, "top_p": 0.9})
+                evaluator = ResumeEvaluator(model_name=DEFAULT_MODEL, model_params=params)
+                evaluation = evaluator.evaluate_resume(resume_text)
+                result = _map_evaluation(evaluation, job_id)
+                result["engine"] = "hiring_agent"
+                result["github_enriched"] = github_enriched
+                result["github_url"] = github_url
+                result["duration_ms"] = int((time.perf_counter() - t0) * 1000)
+                return result
         except Exception as exc:
-            # Do NOT return fake happy stub 72 — surface failure for product honesty
             ms = int((time.perf_counter() - t0) * 1000)
             return {
                 "job_id": job_id,
