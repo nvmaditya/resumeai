@@ -549,14 +549,16 @@ def delete_resume_version(
 @router.post("/{resume_id}/generate", response_model=GenerateResponse)
 def generate_resume_latex(
     resume_id: str,
+    request: Request,
     body: GenerateRequest = GenerateRequest(),
     user: User = Depends(get_current_user),
     session: Session = Depends(get_session),
     store: ObjectStore = Depends(get_store),
 ) -> GenerateResponse:
-    """Form → LaTeX via LangGraph lint/compile agent; persist source on success or draft."""
+    """Form → LaTeX via skill+LLM seed (coach provider) then LangGraph lint/compile loop."""
     from app.config import get_settings
     from app.generate.agent import run_generate_agent
+    from app.generate.llm import coach_complete_fn, make_llm_revise, make_llm_seed
 
     resume = _load_owned(session, user, resume_id)
     structured = body.structured_json if body.structured_json is not None else resume.structured_json
@@ -564,12 +566,25 @@ def generate_resume_latex(
         resume.structured_json = body.structured_json
     title = (body.title if body.title is not None else resume.title) or "Resume"
     settings = get_settings()
-    use_stub = (settings.coach_backend or "").strip().lower() == "stub"
-    result = run_generate_agent(structured or {}, title=title, use_stub=use_stub)
+    backend = (settings.coach_backend or "").strip().lower()
+    use_stub = backend in ("", "stub")
+    coach = getattr(request.app.state, "coach", None)
+    complete = coach_complete_fn(coach) if not use_stub else None
+    # StubCoach has no complete → force deterministic path
+    if complete is None:
+        use_stub = True
+    llm_seed = make_llm_seed(complete) if complete and not use_stub else None
+    llm_revise = make_llm_revise(complete) if complete and not use_stub else None
+    result = run_generate_agent(
+        structured or {},
+        title=title,
+        use_stub=use_stub,
+        llm_seed=llm_seed,
+        llm_revise=llm_revise,
+    )
     key = resume.latex_key or _latex_key(user.id, resume.id)
     store.put(key, (result.latex or "").encode("utf-8"))
     resume.latex_key = key
-    # Keep track latex so preview/download work; form path stays structured SoT for regenerate
     if resume.track == "structured" or resume.template_id:
         resume.track = "latex" if not resume.template_id else resume.track
     resume.updated_at = datetime.now(timezone.utc)

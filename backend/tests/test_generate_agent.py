@@ -1,6 +1,6 @@
 """Real entry: run_generate_agent + generate API + version delete."""
 
-from pathlib import Path
+from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
@@ -63,7 +63,6 @@ def test_agent_repairs_or_reports_bad_seed(monkeypatch):
         return bad
 
     monkeypatch.setattr(agent_mod, "form_to_latex", broken)
-    # reset graph so nodes pick up patched form_to_latex on next seed
     agent_mod._GRAPH = None
     try:
         result = run_generate_agent({"basics": {"name": "X"}}, title="X", use_stub=True)
@@ -75,6 +74,58 @@ def test_agent_repairs_or_reports_bad_seed(monkeypatch):
     finally:
         monkeypatch.setattr(agent_mod, "form_to_latex", orig)
         agent_mod._GRAPH = None
+
+
+def test_llm_seed_receives_skill_and_sets_latex():
+    """Injected llm_seed/llm_revise must receive skill text; seed return becomes latex."""
+    from app.generate.agent import run_generate_agent
+    from app.generate.skill_loader import load_latex_generate_skill
+
+    skill_text = load_latex_generate_skill()
+    seen: dict[str, Any] = {}
+
+    def fake_seed(*, structured, title, skill):
+        seen["seed_skill"] = skill
+        seen["title"] = title
+        seen["name"] = (structured.get("basics") or {}).get("name")
+        return (
+            r"\documentclass{article}\begin{document}"
+            r"LLM_SEEDED_MARKER "
+            + str(seen["name"])
+            + r"\end{document}"
+        )
+
+    def fake_revise(*, latex, diagnostics, skill, structured, title="Resume"):
+        seen["revise_skill"] = skill
+        seen["revise_called"] = True
+        return latex
+
+    result = run_generate_agent(
+        {"basics": {"name": "Eve", "email": "e@x.y"}},
+        title="Eve",
+        use_stub=False,
+        llm_seed=fake_seed,
+        llm_revise=fake_revise,
+    )
+    assert skill_text
+    assert seen.get("seed_skill") == skill_text
+    assert "documentclass" in (seen.get("seed_skill") or "").lower() or "LaTeX" in (
+        seen.get("seed_skill") or ""
+    )
+    assert "LLM_SEEDED_MARKER" in result.latex
+    assert "Eve" in result.latex
+    assert result.used_llm is True
+    assert result.skill_loaded is True
+
+
+def test_extract_latex_from_fenced_response():
+    from app.generate.llm import extract_latex
+
+    raw = "Here you go:\n```latex\n\\documentclass{article}\\begin{document}Hi\\end{document}\n```\n"
+    out = extract_latex(raw)
+    assert "\\documentclass" in out
+    assert "Hi" in out
+    assert "```" not in out
 
 
 @pytest.fixture()

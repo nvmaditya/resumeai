@@ -93,6 +93,10 @@ class LlmCoach:
                 proposed_edit=None,
             )
 
+    def complete(self, system: str, user: str) -> str:
+        """Public chat completion (generate agent + coach share this stack)."""
+        return self._chat(system, user)
+
     def _chat(self, system: str, user: str) -> str:
         if self.backend == "ollama":
             return self._ollama_chat(system, user)

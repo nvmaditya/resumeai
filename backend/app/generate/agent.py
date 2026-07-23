@@ -1,4 +1,4 @@
-"""LangGraph form→LaTeX agent: generate, lint, compile, revise (bounded)."""
+"""LangGraph form→LaTeX agent: LLM (skill) seed → lint → compile → revise."""
 
 from __future__ import annotations
 
@@ -23,11 +23,13 @@ class AgentState(TypedDict, total=False):
     latex: str
     diagnostics: list[dict[str, Any]]
     iteration: int
-    status: str  # ok | failed | processing
+    status: str
     error: str
     skill: str
     use_stub: bool
-    llm_revise: Any
+    llm_seed: Any  # Callable → latex
+    llm_revise: Any  # Callable → latex
+    used_llm: bool
 
 
 @dataclass
@@ -38,6 +40,7 @@ class GenerateResult:
     diagnostics: list[dict[str, Any]] = field(default_factory=list)
     error: str | None = None
     skill_loaded: bool = False
+    used_llm: bool = False
 
 
 def _error_diags(diags: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -50,8 +53,6 @@ def tool_lint(latex: str) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     for d in diags:
         out.append(d.to_dict() if hasattr(d, "to_dict") else dict(d))  # type: ignore[arg-type]
-    # Generation quality gate: plain text without a document is an error even if
-    # static lint is silent when no document markers appear at all.
     if "\\documentclass" not in text:
         out.append(
             {
@@ -105,11 +106,37 @@ def tool_compile(latex: str, work_dir: Path | None = None) -> dict[str, Any]:
     }
 
 
+def _looks_like_doc(latex: str) -> bool:
+    t = latex or ""
+    return (
+        "\\documentclass" in t
+        and "\\begin{document}" in t
+        and "\\end{document}" in t
+    )
+
+
 def _node_seed(state: AgentState) -> dict[str, Any]:
     skill = load_latex_generate_skill()
     structured = state.get("structured") or {}
     title = state.get("title") or "Resume"
-    latex = form_to_latex(structured, title=title)
+    use_stub = bool(state.get("use_stub", True))
+    used_llm = False
+    latex = ""
+
+    llm_seed: Callable[..., str] | None = state.get("llm_seed")
+    if llm_seed and not use_stub:
+        try:
+            latex = llm_seed(structured=structured, title=title, skill=skill)
+            if _looks_like_doc(latex):
+                used_llm = True
+            else:
+                latex = ""
+        except Exception:
+            latex = ""
+
+    if not latex:
+        latex = form_to_latex(structured, title=title)
+
     return {
         "skill": skill,
         "latex": latex,
@@ -117,6 +144,7 @@ def _node_seed(state: AgentState) -> dict[str, Any]:
         "diagnostics": [],
         "status": "processing",
         "error": "",
+        "used_llm": used_llm,
     }
 
 
@@ -127,14 +155,18 @@ def _node_lint(state: AgentState) -> dict[str, Any]:
 
 def _repair_latex(latex: str, diags: list[dict[str, Any]], state: AgentState) -> str:
     reviser: Callable[..., str] | None = state.get("llm_revise")
-    if reviser and not state.get("use_stub", True):
+    use_stub = bool(state.get("use_stub", True))
+    if reviser and not use_stub:
         try:
-            return reviser(
+            fixed = reviser(
                 latex=latex,
                 diagnostics=diags,
                 skill=state.get("skill") or "",
                 structured=state.get("structured") or {},
+                title=state.get("title") or "Resume",
             )
+            if _looks_like_doc(fixed):
+                return fixed
         except Exception:
             pass
     text = latex or ""
@@ -250,14 +282,16 @@ def run_generate_agent(
     *,
     title: str = "Resume",
     use_stub: bool = True,
+    llm_seed: Callable[..., str] | None = None,
     llm_revise: Callable[..., str] | None = None,
 ) -> GenerateResult:
-    """Real shipped entry: form JSON → LaTeX via LangGraph lint/compile tools."""
+    """Form JSON → LaTeX: optional LLM (skill) seed/revise + LangGraph lint/compile loop."""
     skill = load_latex_generate_skill()
     init: AgentState = {
         "structured": structured or {},
         "title": title,
         "use_stub": use_stub,
+        "llm_seed": llm_seed,
         "llm_revise": llm_revise,
         "skill": skill,
     }
@@ -275,4 +309,5 @@ def run_generate_agent(
         diagnostics=diags,
         error=final.get("error") or None,
         skill_loaded=skill_ok,
+        used_llm=bool(final.get("used_llm")),
     )
