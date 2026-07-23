@@ -66,11 +66,23 @@ def _to_out(resume: Resume, store: ObjectStore) -> ResumeOut:
 
 def _empty_structured() -> dict[str, Any]:
     return {
-        "basics": {"name": "", "email": "", "summary": ""},
+        "basics": {
+            "name": "",
+            "email": "",
+            "phone": "",
+            "location": "",
+            "website": "",
+            "linkedin": "",
+            "github": "",
+            "summary": "",
+        },
         "work": [],
         "education": [],
         "skills": [],
         "projects": [],
+        "publications": [],
+        "awards": [],
+        "certifications": [],
     }
 
 
@@ -90,7 +102,14 @@ def get_templates(
 ) -> list[TemplateOut]:
     _ = user
     return [
-        TemplateOut(id=t.id, title=t.title, filename=t.filename) for t in list_templates()
+        TemplateOut(
+            id=t.id,
+            title=t.title,
+            filename=t.filename,
+            fields=list(t.fields),
+            sections=list(t.sections),
+        )
+        for t in list_templates()
     ]
 
 

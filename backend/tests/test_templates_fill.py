@@ -11,6 +11,40 @@ def test_empty_form_no_sample_placeholders():
     assert "Company Name" not in tex
     assert "RESUMEAI:BODY" not in tex
     assert "Ada" in tex or "Name" in tex
+    # no fake social URLs when form empty
+    assert "https://linkedin.com}" not in tex
+    assert "https://github.com}" not in tex
+
+
+def test_technical_no_placeholder_urls_when_empty():
+    tex = render_template(
+        "resume-technical",
+        {"basics": {"name": "Ada", "email": "", "summary": ""}},
+        title="Ada",
+    )
+    assert "https://linkedin.com" not in tex
+    assert "email@example.com" not in tex
+    assert "Ada" in tex
+
+
+def test_technical_real_github_linkedin():
+    tex = render_template(
+        "resume-technical",
+        {
+            "basics": {
+                "name": "Ada",
+                "email": "a@b.c",
+                "github": "adalovelace",
+                "linkedin": "https://linkedin.com/in/ada",
+                "location": "London",
+            }
+        },
+        title="Ada",
+    )
+    assert "adalovelace" in tex or "github.com/adalovelace" in tex
+    assert "linkedin.com/in/ada" in tex
+    assert "London" in tex
+    assert "https://linkedin.com}" not in tex  # bare placeholder domain alone
 
 
 def test_education_only_omits_experience():

@@ -1,14 +1,6 @@
 import { useEffect, useState } from 'react'
-import { api, type User, type UserProfile } from '../api/client'
+import { api, type User } from '../api/client'
 import { useToast } from '../toast'
-
-const empty: UserProfile = {
-  display_name: '',
-  github_username: '',
-  linkedin_url: '',
-  portfolio_url: '',
-  headline: '',
-}
 
 type Props = {
   onClose?: () => void
@@ -19,7 +11,7 @@ type Props = {
 export function Settings({ onClose, onLogout, embedded }: Props) {
   const toast = useToast()
   const [email, setEmail] = useState('')
-  const [profile, setProfile] = useState<UserProfile>(empty)
+  const [githubUsername, setGithubUsername] = useState('')
   const [gh, setGh] = useState<{
     cached: boolean
     username?: string | null
@@ -33,7 +25,7 @@ export function Settings({ onClose, onLogout, embedded }: Props) {
     void (async () => {
       const me = await api<User>('/auth/me')
       setEmail(me.email)
-      setProfile({ ...empty, ...(me.profile || {}) })
+      setGithubUsername(me.profile?.github_username || '')
       try {
         setGh(await api('/auth/me/github'))
       } catch {
@@ -47,10 +39,12 @@ export function Settings({ onClose, onLogout, embedded }: Props) {
     try {
       const me = await api<User>('/auth/me', {
         method: 'PATCH',
-        body: JSON.stringify({ profile }),
+        body: JSON.stringify({
+          profile: { github_username: githubUsername.trim() },
+        }),
       })
-      setProfile({ ...empty, ...(me.profile || {}) })
-      toast.push('Settings saved')
+      setGithubUsername(me.profile?.github_username || githubUsername.trim())
+      toast.push('GitHub username saved')
     } catch (ex) {
       toast.push(ex instanceof Error ? ex.message : 'Save failed')
     } finally {
@@ -61,6 +55,15 @@ export function Settings({ onClose, onLogout, embedded }: Props) {
   async function updateGithub() {
     setRefreshing(true)
     try {
+      // ensure username saved first
+      if (githubUsername.trim()) {
+        await api<User>('/auth/me', {
+          method: 'PATCH',
+          body: JSON.stringify({
+            profile: { github_username: githubUsername.trim() },
+          }),
+        })
+      }
       const out = await api<{ username: string; repo_count: number; fetched_at: string }>(
         '/auth/me/github/refresh',
         { method: 'POST', body: '{}' },
@@ -79,43 +82,44 @@ export function Settings({ onClose, onLogout, embedded }: Props) {
     }
   }
 
-  function field(key: keyof UserProfile, label: string, placeholder = '') {
-    return (
-      <label className="block text-sm">
-        <span className="mb-1 block text-[var(--color-muted)]">{label}</span>
-        <input
-          className="input w-full"
-          value={profile[key]}
-          placeholder={placeholder}
-          onChange={(e) => setProfile((p) => ({ ...p, [key]: e.target.value }))}
-        />
-      </label>
-    )
-  }
-
   const body = (
     <div className="space-y-4">
       {!embedded && (
         <h1 className="font-display text-xl font-semibold text-[var(--color-text)]">Settings</h1>
       )}
       <p className="text-xs text-[var(--color-muted)]">Account: {email || '…'}</p>
+      <p className="text-xs text-[var(--color-soft)]">
+        Contact links (LinkedIn, portfolio, phone) live on each resume form — not here.
+      </p>
 
       <div className="space-y-3 rounded border border-[var(--color-line)] bg-[var(--color-panel)] p-4">
-        {field('display_name', 'Display name')}
-        {field('headline', 'Headline', 'e.g. CS undergrad · AI systems')}
-        {field('github_username', 'GitHub username', 'nvmaditya')}
-        {field('linkedin_url', 'LinkedIn URL')}
-        {field('portfolio_url', 'Portfolio URL')}
-        <button type="button" className="btn btn-primary" disabled={busy} onClick={() => void save()}>
-          {busy ? 'Saving…' : 'Save profile'}
-        </button>
-      </div>
-
-      <div className="space-y-2 rounded border border-[var(--color-line)] bg-[var(--color-panel)] p-4">
-        <h2 className="text-sm font-semibold">GitHub data (for scoring)</h2>
+        <h2 className="text-sm font-semibold">GitHub (for scoring)</h2>
         <p className="text-[11px] text-[var(--color-muted)]">
           Score uses this cache only — no GitHub API on each score. Update when your repos change.
         </p>
+        <label className="block text-sm">
+          <span className="mb-1 block text-[var(--color-muted)]">GitHub username</span>
+          <input
+            className="input w-full"
+            value={githubUsername}
+            placeholder="nvmaditya"
+            onChange={(e) => setGithubUsername(e.target.value)}
+            autoComplete="username"
+          />
+        </label>
+        <div className="flex flex-wrap gap-2">
+          <button type="button" className="btn btn-primary" disabled={busy} onClick={() => void save()}>
+            {busy ? 'Saving…' : 'Save username'}
+          </button>
+          <button
+            type="button"
+            className="btn btn-secondary"
+            disabled={refreshing || !githubUsername.trim()}
+            onClick={() => void updateGithub()}
+          >
+            {refreshing ? 'Updating…' : 'Update GitHub data'}
+          </button>
+        </div>
         {gh?.cached ? (
           <p className="text-xs text-[var(--color-soft)]">
             Cached @{gh.username} · {gh.repo_count ?? 0} repos
@@ -123,17 +127,9 @@ export function Settings({ onClose, onLogout, embedded }: Props) {
           </p>
         ) : (
           <p className="text-xs text-[var(--color-warn)]">
-            No cache yet — set GitHub username above, save, then update.
+            No cache yet — set username and update.
           </p>
         )}
-        <button
-          type="button"
-          className="btn btn-secondary"
-          disabled={refreshing || !profile.github_username.trim()}
-          onClick={() => void updateGithub()}
-        >
-          {refreshing ? 'Updating…' : 'Update GitHub data'}
-        </button>
       </div>
 
       {onLogout && (

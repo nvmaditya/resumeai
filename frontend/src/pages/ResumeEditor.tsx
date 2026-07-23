@@ -8,6 +8,7 @@ import {
   type LatexVersion,
   type LintDiagnostic,
   type Resume,
+  type TemplateInfo,
 } from '../api/client'
 import { ProgressStepper } from '../components/ProgressStepper'
 import { LatexEditor, type LatexEditorHandle } from '../components/LatexEditor'
@@ -57,9 +58,8 @@ export function ResumeEditor() {
   const [tagsText, setTagsText] = useState('')
   const [linting, setLinting] = useState(false)
   const [diagnostics, setDiagnostics] = useState<LintDiagnostic[]>([])
-  // form | latex view for dual-mode resumes (template / latex track)
-  const [editView, setEditView] = useState<'form' | 'latex'>('latex')
   const [loadErr, setLoadErr] = useState('')
+  const [templateMeta, setTemplateMeta] = useState<TemplateInfo | null>(null)
   const compilingRef = useRef(false)
 
   async function load() {
@@ -72,9 +72,17 @@ export function ResumeEditor() {
       setLatexBackup(r.latex_body || '')
       setStructured(fromApi(r.structured_json as Record<string, unknown>))
       setTagsText((r.tags || []).join(', '))
-      // templates default to form for filling; plain latex stays on source
-      setEditView(r.template_id ? 'form' : r.track === 'latex' ? 'latex' : 'form')
       setDirty(false)
+      if (r.template_id) {
+        try {
+          const tpls = await api<TemplateInfo[]>('/templates')
+          setTemplateMeta(tpls.find((t) => t.id === r.template_id) || null)
+        } catch {
+          setTemplateMeta(null)
+        }
+      } else {
+        setTemplateMeta(null)
+      }
     } catch (ex) {
       setResume(null)
       setLoadErr(ex instanceof Error ? ex.message : 'Failed to load resume')
@@ -90,6 +98,7 @@ export function ResumeEditor() {
     setProposed(null)
     setDiagnostics([])
     setStatus('')
+    setTemplateMeta(null)
   }, [id])
 
   function parseTags(text: string): string[] {
@@ -99,36 +108,15 @@ export function ResumeEditor() {
       .filter(Boolean)
   }
 
-  const dualMode =
-    !!resume && (resume.track === 'latex' || !!resume.template_id || !!resume.latex_body)
+  // Path 1: paste LaTeX (no template_id) → editor only.
+  // Path 2: template → form only (fills .tex on save).
+  const isTemplate = !!resume?.template_id
 
   async function save(opts?: { quiet?: boolean }) {
     const tags = parseTags(tagsText)
-    // Template form view: structured only → server re-fills .tex.
-    // LaTeX view: send latex_body so hand edits stick (not wiped by form re-fill).
-    // Dual non-template: both (form for scoring metadata, latex for PDF).
-    let body: Record<string, unknown>
-    if (dualMode && resume?.template_id && editView === 'form') {
-      body = { title, structured_json: toApi(structured), tags }
-    } else if (dualMode && editView === 'latex') {
-      body = {
-        title,
-        latex_body: latex,
-        structured_json: toApi(structured),
-        tags,
-      }
-    } else if (dualMode) {
-      body = {
-        title,
-        latex_body: latex,
-        structured_json: toApi(structured),
-        tags,
-      }
-    } else if (resume?.track === 'latex') {
-      body = { title, latex_body: latex, tags }
-    } else {
-      body = { title, structured_json: toApi(structured), tags }
-    }
+    const body: Record<string, unknown> = isTemplate
+      ? { title, structured_json: toApi(structured), tags }
+      : { title, latex_body: latex, tags }
     const r = await api<Resume>(`/resumes/${id}`, {
       method: 'PATCH',
       body: JSON.stringify(body),
@@ -145,7 +133,7 @@ export function ResumeEditor() {
   }
 
   async function runLint() {
-    if (!latex.trim()) return
+    if (isTemplate || !latex.trim()) return
     setLinting(true)
     try {
       if (dirty) await save()
@@ -201,7 +189,7 @@ export function ResumeEditor() {
     if (!resume) return
     const t = window.setTimeout(() => void compileAndPreview({ quiet: true }), 1000)
     return () => window.clearTimeout(t)
-  }, [latex, structured, title])
+  }, [isTemplate ? structured : latex, title])
 
   async function downloadPdf() {
     try {
@@ -402,7 +390,7 @@ export function ResumeEditor() {
     | { engine?: string; github_enriched?: boolean; duration_ms?: number }
     | null
     | undefined
-  const hasLatex = !!(resume.latex_body || resume.track === 'latex' || resume.template_id)
+  const hasLatexSource = !!(resume.latex_body || resume.track === 'latex' || resume.template_id)
   const scoreLabel = job?.status === 'complete' || job?.status === 'failed' ? 'Re-check score' : 'Check score'
 
   return (
@@ -465,13 +453,12 @@ export function ResumeEditor() {
             >
               {previewBusy ? 'Compiling…' : 'Compile'}
             </button>
-            {hasLatex && (
+            {!isTemplate && (
               <button
                 type="button"
                 onClick={() => void runLint()}
                 className="btn btn-secondary w-full py-1.5 text-xs"
-                disabled={linting || editView === 'form'}
-                title={editView === 'form' ? 'Switch to LaTeX to lint source' : 'Lint LaTeX'}
+                disabled={linting}
               >
                 {linting ? 'Linting…' : 'Lint LaTeX'}
               </button>
@@ -479,7 +466,7 @@ export function ResumeEditor() {
             <button type="button" onClick={() => void downloadPdf()} className="btn btn-secondary w-full py-1.5 text-xs">
               Download PDF
             </button>
-            {hasLatex && (
+            {hasLatexSource && (
               <button type="button" onClick={() => void downloadTex()} className="btn btn-secondary w-full py-1.5 text-xs">
                 Download .tex
               </button>
@@ -743,50 +730,23 @@ export function ResumeEditor() {
 
         <section
           className="flex min-h-0 flex-col overflow-hidden rounded border border-[var(--color-line)] xl:col-span-2"
-          style={{ background: 'var(--editor-bg)' }}
+          style={{ background: isTemplate ? 'var(--color-panel)' : 'var(--editor-bg)' }}
         >
           <div
             className="flex shrink-0 items-center justify-between gap-2 border-b border-[var(--color-line)] px-2 py-1 text-[10px]"
             style={{ color: 'var(--editor-gutter-fg)' }}
           >
             <div className="flex items-center gap-2">
-              {dualMode ? (
-                <div className="flex rounded border border-[var(--color-line)] p-0.5">
-                  <button
-                    type="button"
-                    className={
-                      editView === 'form'
-                        ? 'rounded bg-[var(--editor-active)] px-2 py-0.5 font-medium'
-                        : 'rounded px-2 py-0.5 opacity-70 hover:opacity-100'
-                    }
-                    onClick={() => setEditView('form')}
-                  >
-                    Form
-                  </button>
-                  <button
-                    type="button"
-                    className={
-                      editView === 'latex'
-                        ? 'rounded bg-[var(--editor-active)] px-2 py-0.5 font-medium'
-                        : 'rounded px-2 py-0.5 opacity-70 hover:opacity-100'
-                    }
-                    onClick={() => setEditView('latex')}
-                  >
-                    LaTeX
-                  </button>
-                </div>
-              ) : (
-                <span>Structured form</span>
-              )}
-              {dualMode && editView === 'form' && (
-                <span className="text-[var(--color-muted)]">
-                  {resume.template_id
-                    ? 'Form fills template · empty sections omitted · Save updates PDF'
-                    : 'PDF uses LaTeX · form saved for scoring'}
-                </span>
-              )}
+              <span className="font-medium text-[var(--color-soft)]">
+                {isTemplate ? 'Structured form' : 'LaTeX source'}
+              </span>
+              <span className="text-[var(--color-muted)]">
+                {isTemplate
+                  ? 'Fields fill the template · empty omitted · Download .tex anytime after compile'
+                  : 'Paste or edit your .tex · no form (your layout stays yours)'}
+              </span>
             </div>
-            {dualMode && editView === 'latex' && (
+            {!isTemplate && (
               <span className="flex gap-1">
                 <button
                   type="button"
@@ -808,7 +768,19 @@ export function ResumeEditor() {
             )}
           </div>
           <div className="min-h-0 flex-1">
-            {dualMode && editView === 'latex' ? (
+            {isTemplate ? (
+              <div className="h-full overflow-auto bg-[var(--color-panel)] p-2">
+                <StructuredForm
+                  value={structured}
+                  onChange={(v) => {
+                    setStructured(v)
+                    setDirty(true)
+                  }}
+                  visibleFields={templateMeta?.fields}
+                  visibleSections={templateMeta?.sections}
+                />
+              </div>
+            ) : (
               <LatexEditor
                 value={latex}
                 onChange={(v) => {
@@ -817,16 +789,6 @@ export function ResumeEditor() {
                 }}
                 editorRef={latexRef}
               />
-            ) : (
-              <div className="h-full overflow-auto bg-[var(--color-panel)] p-2">
-                <StructuredForm
-                  value={structured}
-                  onChange={(v) => {
-                    setStructured(v)
-                    setDirty(true)
-                  }}
-                />
-              </div>
             )}
           </div>
         </section>

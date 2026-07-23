@@ -88,6 +88,8 @@ class TemplateOut(BaseModel):
     id: str
     title: str
     filename: str
+    fields: list[str] = Field(default_factory=list)
+    sections: list[str] = Field(default_factory=list)
 
 
 class LintRequest(BaseModel):

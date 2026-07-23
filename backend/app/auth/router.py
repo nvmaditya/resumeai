@@ -68,10 +68,14 @@ def update_me(
 ) -> UserOut:
     if body.profile is not None:
         cur = dict(user.profile_json or {})
-        cur.update(body.profile.model_dump())
-        # light sanitize lengths
-        for k, v in list(cur.items()):
-            cur[k] = str(v or "")[:500]
+        incoming = body.profile.model_dump()
+        # Partial-friendly: always apply github_username; other keys only if non-empty
+        # so Settings "github only" PATCH does not wipe legacy profile fields.
+        cur["github_username"] = str(incoming.get("github_username") or "")[:500]
+        for k in ("display_name", "linkedin_url", "portfolio_url", "headline"):
+            val = str(incoming.get(k) or "").strip()
+            if val:
+                cur[k] = val[:500]
         user.profile_json = cur
         session.add(user)
         session.commit()

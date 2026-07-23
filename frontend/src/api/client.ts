@@ -86,11 +86,11 @@ export async function fetchPdfBytes(path: string): Promise<ArrayBuffer> {
 }
 
 export type UserProfile = {
-  display_name: string
+  display_name?: string
   github_username: string
-  linkedin_url: string
-  portfolio_url: string
-  headline: string
+  linkedin_url?: string
+  portfolio_url?: string
+  headline?: string
 }
 export type User = {
   id: string
@@ -118,6 +118,8 @@ export type TemplateInfo = {
   id: string
   title: string
   filename: string
+  fields?: string[]
+  sections?: string[]
 }
 export type LintDiagnostic = {
   line: number | null

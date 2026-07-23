@@ -1,0 +1,20 @@
+{
+  "fields": [
+    "basics.name",
+    "basics.email",
+    "basics.phone",
+    "basics.location",
+    "basics.website",
+    "basics.linkedin",
+    "basics.github",
+    "basics.summary"
+  ],
+  "sections": [
+    "education",
+    "work",
+    "projects",
+    "skills",
+    "awards",
+    "certifications"
+  ]
+}
