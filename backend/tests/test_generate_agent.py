@@ -193,10 +193,65 @@ def test_generate_api_persists_latex(client: TestClient):
     assert gen.status_code == 200, gen.text
     body = gen.json()
     assert body["skill_loaded"] is True
+    assert body.get("used_llm") is False  # stub coach path
     assert "\\documentclass" in body["latex_body"]
     assert "Bob" in body["latex_body"]
     got = client.get(f"/api/v1/resumes/{rid}", headers=headers)
     assert "Bob" in (got.json().get("latex_body") or "")
+
+
+def test_generate_api_calls_coach_complete(client: TestClient, monkeypatch):
+    """HTTP path: non-stub COACH_BACKEND + coach.complete → used_llm + skill in prompt."""
+    import app.config as config_mod
+
+    monkeypatch.setenv("COACH_BACKEND", "ollama")
+    config_mod.get_settings.cache_clear()
+
+    calls: list[tuple[str, str]] = []
+
+    class FakeCoach:
+        def complete(self, system: str, user: str) -> str:
+            calls.append((system, user))
+            return (
+                r"\documentclass{article}\begin{document}"
+                r"HTTP_LLM_MARKER\end{document}"
+            )
+
+    client.app.state.coach = FakeCoach()
+    try:
+        headers = _auth(client)
+        resume = client.post(
+            "/api/v1/resumes",
+            headers=headers,
+            json={
+                "title": "LLM",
+                "track": "latex",
+                "template_id": "resume-classic-ats",
+                "structured_json": {
+                    "basics": {"name": "Cara", "email": "c@d.e", "summary": "S"},
+                    "work": [],
+                    "education": [],
+                    "skills": [],
+                    "projects": [],
+                },
+            },
+        )
+        assert resume.status_code == 201, resume.text
+        rid = resume.json()["id"]
+        gen = client.post(f"/api/v1/resumes/{rid}/generate", headers=headers, json={})
+        assert gen.status_code == 200, gen.text
+        body = gen.json()
+        assert calls, "router must call coach.complete when backend != stub"
+        system, user = calls[0]
+        assert "SKILL" in system or "skill" in system.lower() or "LaTeX" in system
+        assert "Cara" in user or "Cara" in system
+        assert body.get("used_llm") is True
+        assert "HTTP_LLM_MARKER" in body["latex_body"]
+        assert "Cara" in body["latex_body"] or "HTTP_LLM_MARKER" in body["latex_body"]
+    finally:
+        monkeypatch.setenv("COACH_BACKEND", "stub")
+        config_mod.get_settings.cache_clear()
+        client.app.state.coach = None
 
 
 def test_version_delete(client: TestClient):

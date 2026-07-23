@@ -195,6 +195,7 @@ export function ResumeEditor() {
         iterations: number
         diagnostics?: LintDiagnostic[]
         error?: string | null
+        used_llm?: boolean
       }>(`/resumes/${id}/generate`, {
         method: 'POST',
         body: JSON.stringify({ structured_json: toApi(structured), title }),
@@ -204,12 +205,13 @@ export function ResumeEditor() {
       setDirty(false)
       const r = await api<Resume>(`/resumes/${id}`)
       setResume(r)
+      const via = out.used_llm ? 'AI' : 'template fallback'
       if (out.status === 'ok') {
-        toast.push(`LaTeX generated · ${out.iterations} repair pass(es)`)
-        setStatus(`Generated · ok · ${out.iterations} iter`)
+        toast.push(`LaTeX generated (${via}) · ${out.iterations} repair pass(es)`)
+        setStatus(`Generated · ${via} · ok · ${out.iterations} iter`)
         await compileAndPreview({ quiet: true })
       } else {
-        toast.push(out.error || 'Generate finished with lint/compile issues')
+        toast.push(out.error || `Generate finished with issues (${via})`)
         setStatus(out.error || 'Generate failed quality loop')
       }
     } catch (ex) {

@@ -598,6 +598,7 @@ def generate_resume_latex(
         diagnostics=result.diagnostics,
         error=result.error,
         skill_loaded=result.skill_loaded,
+        used_llm=result.used_llm,
     )
 
 

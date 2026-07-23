@@ -165,3 +165,4 @@ class GenerateResponse(BaseModel):
     diagnostics: list[dict[str, Any]] = Field(default_factory=list)
     error: Optional[str] = None
     skill_loaded: bool = False
+    used_llm: bool = False
