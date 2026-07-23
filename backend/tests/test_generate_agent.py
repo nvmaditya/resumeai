@@ -169,6 +169,34 @@ def _auth(client: TestClient) -> dict[str, str]:
     return {"Authorization": f"Bearer {login.json()['access_token']}"}
 
 
+def test_create_structured_ai_path_no_template(client: TestClient):
+    """Happy-path create for AI form path: track structured, no template_id."""
+    headers = _auth(client)
+    resume = client.post(
+        "/api/v1/resumes",
+        headers=headers,
+        json={
+            "title": "AI resume",
+            "track": "structured",
+            "structured_json": {
+                "basics": {"name": "Pat", "email": "p@q.r", "summary": "Hi"},
+                "work": [],
+                "education": [],
+                "skills": [],
+                "projects": [],
+            },
+        },
+    )
+    assert resume.status_code == 201, resume.text
+    body = resume.json()
+    assert body["track"] == "structured"
+    assert not body.get("template_id")
+    gen = client.post(f"/api/v1/resumes/{body['id']}/generate", headers=headers, json={})
+    assert gen.status_code == 200, gen.text
+    assert "\\documentclass" in gen.json()["latex_body"]
+    assert "Pat" in gen.json()["latex_body"]
+
+
 def test_generate_api_persists_latex(client: TestClient):
     headers = _auth(client)
     resume = client.post(

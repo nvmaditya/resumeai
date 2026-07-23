@@ -5,6 +5,20 @@ from __future__ import annotations
 from typing import Sequence
 
 
+def select_hunks(
+    hunks: Sequence[dict[str, str] | object], indices: Sequence[int]
+) -> list[dict[str, str] | object]:
+    """Return subset of hunks by index (selective apply). Raises on bad index."""
+    if not hunks:
+        return []
+    out: list[dict[str, str] | object] = []
+    for i in indices:
+        if not isinstance(i, int) or i < 0 or i >= len(hunks):
+            raise ValueError(f"invalid hunk index: {i}")
+        out.append(hunks[i])
+    return out
+
+
 def apply_hunks(text: str, hunks: Sequence[dict[str, str] | object]) -> str:
     """Apply ordered hunks. Raises ValueError on missing/ambiguous find."""
     out = text or ""

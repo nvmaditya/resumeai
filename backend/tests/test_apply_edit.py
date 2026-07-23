@@ -25,6 +25,25 @@ def test_apply_hunks_ambiguous():
         apply_hunks("xx xx", [{"find": "xx", "replace": "y"}])
 
 
+def test_select_hunks_and_apply_subset():
+    """Selective apply: only chosen hunks change the document."""
+    from app.chat.hunks import select_hunks
+
+    doc = "AAA BBB CCC DDD"
+    all_hunks = [
+        {"find": "AAA", "replace": "A1"},
+        {"find": "BBB", "replace": "B1"},
+        {"find": "CCC", "replace": "C1"},
+    ]
+    subset = select_hunks(all_hunks, [0, 2])
+    out = apply_hunks(doc, subset)
+    assert out == "A1 BBB C1 DDD"
+    assert "AAA" not in out
+    assert "BBB" in out  # unselected
+    with pytest.raises(ValueError, match="invalid hunk index"):
+        select_hunks(all_hunks, [9])
+
+
 @pytest.fixture()
 def client(tmp_path, monkeypatch):
     db = tmp_path / "test.db"
@@ -95,6 +114,39 @@ def test_apply_edit_api_hunk(client: TestClient):
         },
     )
     assert broken.status_code == 400
+
+
+def test_apply_edit_api_subset_of_multi_hunk(client: TestClient):
+    """HTTP apply-edit with a subset of multi-hunk list (real route)."""
+    h = _auth(client)
+    latex = (
+        r"\documentclass{article}\begin{document}"
+        r"ONE two THREE four"
+        r"\end{document}"
+    )
+    rid = client.post(
+        "/api/v1/resumes",
+        headers=h,
+        json={"title": "Multi", "track": "latex", "latex_body": latex},
+    ).json()["id"]
+
+    # Client would filter; server applies only the hunks sent
+    ok = client.post(
+        f"/api/v1/resumes/{rid}/apply-edit",
+        headers=h,
+        json={
+            "section": "latex",
+            "hunks": [
+                {"find": "ONE", "replace": "1"},
+                {"find": "THREE", "replace": "3"},
+            ],
+        },
+    )
+    assert ok.status_code == 200, ok.text
+    body = ok.json().get("latex_body") or ""
+    assert "1 two 3 four" in body
+    assert "ONE" not in body
+    assert "two" in body  # middle unselected text unchanged
 
 
 def test_build_coach_backends():

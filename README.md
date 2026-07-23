@@ -2,22 +2,24 @@
 
 Local-first AI resume optimization app (SaaS-ready seams). **FastAPI + React**, SQLite, JWT, vendored [HackerRank hiring-agent](https://github.com/interviewstreet/hiring-agent) for scoring, fixed-action **coach** (find/replace hunks), **tectonic** PDF compile, browser-native preview.
 
-**Repo:** https://github.com/nvmaditya/resumeai · **branch:** `main`
+**Repo:** https://github.com/nvmaditya/ResumeAI · **branch:** `main`
 
 ## Features (current)
 
 | Area | What you get |
 |------|----------------|
-| **Workspace** | Desktop layout **1/5** actions · **2/5** LaTeX editor · **2/5** PDF preview |
+| **Create** | **New AI resume** (structured form → **AI Generate**) or **New LaTeX** (paste/edit). No user-facing template picker; `templates/` is internal skill reference only |
+| **Workspace** | Two-tier chrome: identity + File \| Build \| Score \| Danger toolbar; rail (versions · diagnostics · score) · editor · PDF |
+| **AI Generate** | Form JSON → skill-guided LLM seed → LangGraph lint/compile repair; `used_llm` honesty vs deterministic fallback |
+| **Coach** | Fixed actions only; **per-hunk select**; diffs in **editor strip + CodeMirror highlights**; apply selected/all; no free-form chat |
+| **Versions** | Commit checkpoints; scannable rows with restore + delete |
 | **Compile** | Tectonic primary; layout PDF fallback if binary missing |
 | **PDF** | Browser-native iframe preview (blob URL) — no pdf.js / SyncTeX |
-| **Score** | `hiring_agent` or `stub`; **GitHub data from user cache only** (no API on each score) |
-| **Coach** | Fixed actions only; proposes **find/replace hunks**; no free-form chat; no invented facts |
+| **Score** | `hiring_agent` or `stub`; GitHub data from user cache only |
 | **Coach LLMs** | `ollama` · `openrouter` · `groq` · `stub` |
-| **Versions** | Commit message snapshots of LaTeX (hash-skip, cap 30); restore from history list |
 | **Settings** | Profile (name, GitHub username, links) + **Update GitHub data** |
-| **Theme** | Light/dark with diagonal wipe; light + dark LaTeX editor and PDF chrome |
-| **Editor** | CodeMirror LaTeX, Undo/Redo |
+| **Theme** | Light/dark with diagonal wipe; editor theme syncs on the same tick |
+| **Editor** | CodeMirror LaTeX, Undo/Redo, Form \| Source tabs on AI path |
 
 ## Quick start
 
@@ -35,12 +37,14 @@ copy .env.example backend\.env
 # Set GROQ_API_KEY / COACH_BACKEND=groq, or use ollama, etc.
 ```
 
-Flow: register → **Settings** (GitHub username → **Update GitHub data**) → create resume → **Compile** → **Score** (optional JD) → **Coach** → review hunks → **Apply** → recompile → re-score. **Commit** versions from the Version history panel.
+Flow: register → **Settings** (GitHub username → **Update GitHub data**) → **New AI resume** → fill form → **AI Generate** → **Compile** → **Score** → **Coach** → select hunks in editor → **Apply selected** → recompile. Or **New LaTeX** to paste your own `.tex`. **Commit** versions from the left rail.
 
 Health: `GET http://127.0.0.1:8000/api/v1/health`  
 (`score_backend`, `latex_engine`, `coach_backend`, `coach_model`)
 
 ### Done gate + hooks (agents / CI-style local check)
+
+**Agents must update this README before every commit** (see `AGENTS.md`).
 
 ```powershell
 backend\.venv\Scripts\python.exe scripts\verify_before_done.py
@@ -51,6 +55,8 @@ backend\.venv\Scripts\python.exe scripts\verify_before_done.py
 backend\.venv\Scripts\python.exe scripts\check_compile_sample.py   # compile quality alone
 backend\.venv\Scripts\python.exe scripts\install_hooks.py          # pre-commit: pytest + compile (--fast)
 ```
+
+Lessons that needed a second ask live in **`LESSONS.md`** — append when you repeat a mistake.
 
 ## Backend (Python 3.12+)
 
@@ -100,67 +106,8 @@ npm run dev -- --host 127.0.0.1 --port 5173
 backend/bin/tectonic.exe
 ```
 
-Or set `TECTONIC_PATH`. Without it, layout fallback is used (not Overleaf-parity).
+Or set `TECTONIC_PATH`. Without it, a simple layout PDF engine still previews (not full TeX fidelity).
 
-Download: https://github.com/tectonic-typesetting/tectonic/releases
+## License
 
-## Scoring (hiring-agent)
-
-Vendored at `backend/vendor/hiring-agent` (MIT).
-
-- **Score does not call GitHub.** Cache via Settings → **Update GitHub data**.
-- Optional **job description** on score: top-repo pick from cache + keyword `jd_match`.
-- Real evaluator usually needs Ollama (or vendor LLM config) + vendor deps:
-
-```powershell
-uv pip install -r vendor/hiring-agent/requirements.txt --python .venv\Scripts\python.exe
-# ollama pull gemma3:4b && ollama serve
-```
-
-Rubric categories (simplified): open_source, self_projects, production, technical_skills + bonus/deductions — see vendor templates and `backend/app/chat/rubric.py`.
-
-## Coach
-
-- Actions only: `improve_score`, `strengthen_projects`, `align_jd`, `quantify_impact`.
-- Response: advice + `hunks: [{ find, replace }]` (unique substrings).
-- Apply → validates full LaTeX structure → recompile.
-- Untrusted resume/JD fenced; injection phrases filtered.
-
-## Layout
-
-```
-backend/app/     FastAPI (auth, resumes, scoring, chat, compile, storage, …)
-backend/vendor/  hiring-agent
-frontend/        React + Vite + Tailwind + CodeMirror
-docs/            design specs + plans
-scripts/         verify_before_done, compile sample hook
-.grok/skills/    resume-latex agent skill
-```
-
-## SaaS seams (no rewrite later)
-
-| Concern | Now | Later |
-|--------|-----|--------|
-| DB | `DATABASE_URL` SQLite | Postgres URL |
-| Files | `LocalObjectStore` keys | S3 adapter |
-| Jobs | `LocalJobRunner` + DB rows | Redis/worker |
-| Score | stub / hiring-agent adapter | same API |
-| Config | env / `.env.example` | platform secrets |
-
-## Releases (tags)
-
-| Version | Summary |
-|---------|---------|
-| v0.1.0 | Scaffold + hiring-agent vendor + auth/resumes/score stubs |
-| v0.2.0 | Light UI, structured form, safe coach, PDF layout + live preview |
-| v0.3.0 | 1/5–2/5–2/5 workspace + tectonic Overleaf-parity compile |
-| v0.4.0 | (intermediate product slices — see git tags) |
-| v0.5.0 | Drop SyncTeX/pdf.js; coach hunks + rubric; openrouter/groq |
-| v0.6.0 | Undo/redo, latex commits, settings, GitHub score cache |
-
-## Agent / contributor notes
-
-- Rules: `AGENTS.md`
-- Specs: `docs/superpowers/specs/`
-- Before claiming done: `scripts/verify_before_done.py`
-- Do **not** commit: `.env`, `backend/data/`, `backend/cache/`, personal `resume/` samples, `.venv/`, `tectonic.exe`
+MIT (see repo). Vendored hiring-agent is MIT.

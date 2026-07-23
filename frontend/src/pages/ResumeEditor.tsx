@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import {
   api,
@@ -21,9 +21,15 @@ import {
 } from '../components/StructuredForm'
 import { CoachChat, type CoachActionId } from '../components/CoachChat'
 import { useToast } from '../toast'
+import {
+  defaultSelectedIndices,
+  filterSelectedHunks,
+  findHunkRanges,
+} from '../lib/hunks'
 
 type EditHunk = { find: string; replace: string }
 type ProposedEdit = { section: string; before?: string; hunks: EditHunk[] }
+type EditorTab = 'form' | 'source'
 
 export function ResumeEditor() {
   const { id } = useParams()
@@ -38,6 +44,7 @@ export function ResumeEditor() {
   const [jd, setJd] = useState('')
   const [chatReply, setChatReply] = useState('')
   const [proposed, setProposed] = useState<ProposedEdit | null>(null)
+  const [selectedHunks, setSelectedHunks] = useState<number[]>([])
   const [job, setJob] = useState<Job | null>(null)
   const [status, setStatus] = useState('')
   const [scoring, setScoring] = useState(false)
@@ -55,6 +62,7 @@ export function ResumeEditor() {
   const [diagnostics, setDiagnostics] = useState<LintDiagnostic[]>([])
   const [loadErr, setLoadErr] = useState('')
   const [templateMeta, setTemplateMeta] = useState<TemplateInfo | null>(null)
+  const [editorTab, setEditorTab] = useState<EditorTab>('source')
   const compilingRef = useRef(false)
 
   async function load() {
@@ -68,6 +76,8 @@ export function ResumeEditor() {
       setStructured(fromApi(r.structured_json as Record<string, unknown>))
       setTagsText((r.tags || []).join(', '))
       setDirty(false)
+      const formish = r.track === 'structured' || !!r.template_id
+      setEditorTab(formish && !(r.latex_body || '').trim() ? 'form' : formish ? 'form' : 'source')
       if (r.template_id) {
         try {
           const tpls = await api<TemplateInfo[]>('/templates')
@@ -91,6 +101,7 @@ export function ResumeEditor() {
     setJob(null)
     setChatReply('')
     setProposed(null)
+    setSelectedHunks([])
     setDiagnostics([])
     setStatus('')
     setTemplateMeta(null)
@@ -103,18 +114,26 @@ export function ResumeEditor() {
       .filter(Boolean)
   }
 
-  // Form path: template or structured with form data → AI generate primary
-  const isFormPath = !!resume?.template_id || resume?.track === 'structured'
+  // Form/AI path: structured track or legacy template_id
+  const isFormPath = !!resume && (resume.track === 'structured' || !!resume.template_id)
   const isLatexOnly = !!resume && !isFormPath
+  const showForm = isFormPath && editorTab === 'form'
+  const showSource = isLatexOnly || (isFormPath && editorTab === 'source')
 
   async function save(opts?: { quiet?: boolean }) {
     const tags = parseTags(tagsText)
-    const body: Record<string, unknown> = isFormPath
-      ? { title, structured_json: toApi(structured), tags }
-      : { title, latex_body: latex, tags }
     const r = await api<Resume>(`/resumes/${id}`, {
       method: 'PATCH',
-      body: JSON.stringify(body),
+      body: JSON.stringify(
+        isFormPath
+          ? {
+              title,
+              structured_json: toApi(structured),
+              tags,
+              ...(latex.trim() ? { latex_body: latex } : {}),
+            }
+          : { title, latex_body: latex, tags },
+      ),
     })
     setResume(r)
     setTitle(r.title)
@@ -176,14 +195,15 @@ export function ResumeEditor() {
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [dirty, id, latex, structured, tagsText, title, toast, isFormPath],
+    [dirty, id, latex, structured, tagsText, title, toast, isFormPath, editorTab],
   )
 
   useEffect(() => {
     if (!resume) return
+    if (isFormPath && editorTab === 'form' && !latex.trim()) return
     const t = window.setTimeout(() => void compileAndPreview({ quiet: true }), 1200)
     return () => window.clearTimeout(t)
-  }, [isFormPath ? structured : latex, title])
+  }, [isFormPath ? (editorTab === 'form' ? structured : latex) : latex, title])
 
   async function generateLatex() {
     setGenerating(true)
@@ -205,6 +225,7 @@ export function ResumeEditor() {
       setDirty(false)
       const r = await api<Resume>(`/resumes/${id}`)
       setResume(r)
+      setEditorTab('source')
       const via = out.used_llm ? 'AI' : 'template fallback'
       if (out.status === 'ok') {
         toast.push(`LaTeX generated (${via}) · ${out.iterations} repair pass(es)`)
@@ -281,6 +302,7 @@ export function ResumeEditor() {
       setResume(r)
       setLatex(r.latex_body || '')
       setDirty(false)
+      setEditorTab('source')
       toast.push('Restored version')
       void compileAndPreview({ quiet: true })
     } catch (ex) {
@@ -349,6 +371,7 @@ export function ResumeEditor() {
   async function runCoach(action: CoachActionId) {
     setCoaching(true)
     try {
+      if (dirty) await save({ quiet: true })
       const out = await api<{ reply: string; proposed_edit: ProposedEdit | null }>(
         `/resumes/${id}/chat`,
         {
@@ -361,7 +384,11 @@ export function ResumeEditor() {
       )
       setChatReply(out.reply)
       setProposed(out.proposed_edit)
-      toast.push(out.proposed_edit?.hunks?.length ? 'Coach diffs ready' : 'Coach reply ready')
+      if (out.proposed_edit?.hunks?.length) {
+        setSelectedHunks(defaultSelectedIndices(out.proposed_edit.hunks.length))
+        setEditorTab('source')
+      }
+      toast.push(out.proposed_edit?.hunks?.length ? 'Coach diffs ready — select in editor' : 'Coach reply ready')
     } catch (ex) {
       toast.push(ex instanceof Error ? ex.message : 'Coach failed')
     } finally {
@@ -369,22 +396,28 @@ export function ResumeEditor() {
     }
   }
 
-  async function applyEdit() {
+  async function applyEdit(indices: number[]) {
     if (!proposed?.hunks?.length) return
+    const hunks = filterSelectedHunks(proposed.hunks, indices)
+    if (!hunks.length) {
+      toast.push('Select at least one hunk')
+      return
+    }
     const prev = latex
     setLatexBackup(prev)
     try {
       const r = await api<Resume>(`/resumes/${id}/apply-edit`, {
         method: 'POST',
-        body: JSON.stringify({ section: proposed.section, hunks: proposed.hunks }),
+        body: JSON.stringify({ section: proposed.section, hunks }),
       })
       setResume(r)
       if (r.latex_body != null) setLatex(r.latex_body || prev)
       else setStructured(fromApi(r.structured_json as Record<string, unknown>))
       setProposed(null)
+      setSelectedHunks([])
       setDirty(false)
-      setStatus('Edit applied')
-      toast.push('Edit applied')
+      setStatus(`Applied ${hunks.length} hunk(s)`)
+      toast.push(`Applied ${hunks.length} hunk(s)`)
       try {
         await compileAndPreview({ quiet: true })
       } catch {
@@ -405,6 +438,26 @@ export function ResumeEditor() {
     await api(`/resumes/${id}`, { method: 'DELETE' })
     toast.push('Deleted')
     nav('/')
+  }
+
+  const hunkMarks = useMemo(() => {
+    if (!proposed?.hunks?.length || !latex) return []
+    return findHunkRanges(latex, proposed.hunks, selectedHunks)
+  }, [proposed, latex, selectedHunks])
+
+  function focusHunk(i: number) {
+    const h = proposed?.hunks?.[i]
+    if (!h?.find) return
+    setEditorTab('source')
+    window.setTimeout(() => {
+      latexRef.current?.findAndHighlight(h.find)
+    }, 50)
+  }
+
+  function toggleHunk(i: number) {
+    setSelectedHunks((prev) =>
+      prev.includes(i) ? prev.filter((x) => x !== i) : [...prev, i].sort((a, b) => a - b),
+    )
   }
 
   if (loadErr) {
@@ -438,18 +491,18 @@ export function ResumeEditor() {
   const hasLatexSource = !!(resume.latex_body || resume.track === 'latex' || latex)
   const scoreLabel =
     job?.status === 'complete' || job?.status === 'failed' ? 'Re-check score' : 'Check score'
-
   const actionBtn = 'btn btn-secondary py-1 text-[11px] shrink-0'
+  const nSel = selectedHunks.length
 
   return (
-    <div className="relative flex h-[calc(100vh-3.5rem)] flex-col gap-1.5">
-      {/* Header: title, tags, then Actions to the right of tags */}
+    <div className="relative flex h-[calc(100vh-3.5rem)] flex-col gap-1.5" data-workspace="latex-editor">
+      {/* Identity row */}
       <div className="flex shrink-0 flex-wrap items-center gap-2 rounded-lg border border-[var(--color-line)] bg-[var(--color-panel)] px-2.5 py-1.5">
         <Link to="/" className="text-xs text-[var(--color-muted)] hover:text-[var(--color-text)]">
           ← Resumes
         </Link>
         <input
-          className="input max-w-[12rem] py-1 text-sm font-semibold"
+          className="input max-w-[14rem] py-1 text-sm font-semibold"
           value={title}
           onChange={(e) => {
             setTitle(e.target.value)
@@ -470,7 +523,7 @@ export function ResumeEditor() {
         ) : (
           <span className="text-[10px] text-[var(--color-muted)]">Saved</span>
         )}
-        <label className="flex min-w-[8rem] max-w-xs flex-1 items-center gap-1 text-[10px] text-[var(--color-muted)]">
+        <label className="flex min-w-[8rem] max-w-sm flex-1 items-center gap-1 text-[10px] text-[var(--color-muted)]">
           Tags
           <input
             className="input min-w-0 flex-1 py-0.5 text-[11px]"
@@ -483,7 +536,16 @@ export function ResumeEditor() {
             aria-label="Resume tags"
           />
         </label>
-        <div className="flex flex-wrap items-center gap-1 border-l border-[var(--color-line)] pl-2" role="toolbar" aria-label="Actions">
+      </div>
+
+      {/* Actions toolbar — grouped, not competing with identity */}
+      <div
+        className="ws-toolbar shrink-0 rounded-lg border border-[var(--color-line)] bg-[var(--color-panel)] px-2.5 py-1.5"
+        role="toolbar"
+        aria-label="Workspace actions"
+      >
+        <div className="ws-toolbar-group">
+          <span className="ws-toolbar-label">File</span>
           <button type="button" onClick={() => void save()} className={actionBtn}>
             Save
           </button>
@@ -497,6 +559,14 @@ export function ResumeEditor() {
               {generating ? 'Generating…' : 'AI Generate'}
             </button>
           )}
+          {hasLatexSource && (
+            <button type="button" onClick={() => void downloadTex()} className={actionBtn}>
+              .tex
+            </button>
+          )}
+        </div>
+        <div className="ws-toolbar-group">
+          <span className="ws-toolbar-label">Build</span>
           <button
             type="button"
             onClick={() => void compileAndPreview()}
@@ -505,7 +575,7 @@ export function ResumeEditor() {
           >
             {previewBusy ? '…' : 'Compile'}
           </button>
-          {isLatexOnly && (
+          {(isLatexOnly || editorTab === 'source') && (
             <button type="button" onClick={() => void runLint()} className={actionBtn} disabled={linting}>
               {linting ? '…' : 'Lint'}
             </button>
@@ -513,60 +583,32 @@ export function ResumeEditor() {
           <button type="button" onClick={() => void downloadPdf()} className={actionBtn}>
             PDF
           </button>
-          {hasLatexSource && (
-            <button type="button" onClick={() => void downloadTex()} className={actionBtn}>
-              .tex
-            </button>
-          )}
+        </div>
+        <div className="ws-toolbar-group">
+          <span className="ws-toolbar-label">Score</span>
           <button type="button" onClick={() => void score()} className={actionBtn} disabled={scoring}>
             {scoring ? '…' : scoreLabel}
           </button>
+        </div>
+        <div className="ws-toolbar-group">
+          <span className="ws-toolbar-label">Danger</span>
           <button type="button" onClick={() => void remove()} className="btn btn-danger py-1 text-[11px] shrink-0">
             Delete
           </button>
         </div>
       </div>
+
       {status && (
         <p className="px-1 text-[10px] text-[var(--color-soft)]" role="status">
           {status}
         </p>
       )}
 
-      <div className="grid min-h-0 flex-1 grid-cols-1 gap-1.5 xl:grid-cols-5">
-        <aside className="flex min-h-0 flex-col gap-1.5 overflow-y-auto rounded border border-[var(--color-line)] bg-[var(--color-panel)] p-2 xl:col-span-1">
-          {diagnostics.length > 0 && (
-            <div>
-              <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--color-muted)]">
-                Diagnostics ({diagnostics.length})
-              </p>
-              <ul className="max-h-28 space-y-1 overflow-y-auto">
-                {diagnostics.map((d, i) => (
-                  <li key={`${d.source}-${d.line}-${i}`}>
-                    <button
-                      type="button"
-                      className="w-full rounded bg-[var(--color-panel-2)] px-1.5 py-1 text-left text-[10px]"
-                      onClick={() => {
-                        if (d.line != null) latexRef.current?.goToLine(d.line)
-                      }}
-                    >
-                      <span
-                        className={
-                          d.severity === 'error' ? 'text-[var(--color-danger)]' : 'text-[var(--color-warn)]'
-                        }
-                      >
-                        {d.severity}
-                      </span>
-                      {d.line != null && <span className="text-[var(--color-muted)]"> · L{d.line}</span>}
-                      <span className="mt-0.5 block text-[var(--color-soft)]">{d.message}</span>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-
-          <div className="border-t border-[var(--color-line)] pt-2">
-            <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--color-muted)]">
+      <div className="grid min-h-0 flex-1 grid-cols-1 gap-1.5 xl:grid-cols-12">
+        {/* Left rail: versions · diagnostics · score */}
+        <aside className="flex min-h-0 flex-col gap-2 overflow-y-auto rounded border border-[var(--color-line)] bg-[var(--color-panel)] p-2 xl:col-span-3">
+          <div data-version-panel>
+            <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-[var(--color-muted)]">
               Versions
             </p>
             <div className="flex gap-1">
@@ -579,29 +621,31 @@ export function ResumeEditor() {
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') void commitVersion()
                 }}
+                aria-label="Version commit message"
               />
-              <button type="button" className="btn btn-secondary shrink-0 py-1 text-[11px]" onClick={() => void commitVersion()}>
+              <button
+                type="button"
+                className="btn btn-secondary shrink-0 py-1 text-[11px]"
+                onClick={() => void commitVersion()}
+              >
                 Commit
               </button>
             </div>
             {versions.length === 0 ? (
-              <p className="mt-1.5 text-[10px] text-[var(--color-soft)]">No checkpoints yet.</p>
+              <p className="mt-2 text-[10px] text-[var(--color-soft)]">No checkpoints yet.</p>
             ) : (
-              <ul className="mt-1.5 max-h-40 space-y-1 overflow-y-auto">
+              <ul className="mt-2 space-y-1.5">
                 {versions.map((v) => (
-                  <li
-                    key={v.id}
-                    className="flex items-start justify-between gap-1 rounded bg-[var(--color-panel-2)] px-1.5 py-1"
-                  >
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-[11px] font-medium" title={v.message}>
+                  <li key={v.id} className="version-row" data-version-row>
+                    <div className="version-row-meta">
+                      <p className="truncate text-[12px] font-medium leading-snug" title={v.message}>
                         {v.message || 'checkpoint'}
                       </p>
-                      <p className="text-[10px] text-[var(--color-muted)]">
+                      <p className="mt-0.5 text-[10px] tabular-nums text-[var(--color-muted)]">
                         {new Date(v.created_at).toLocaleString()}
                       </p>
                     </div>
-                    <div className="flex shrink-0 flex-col gap-0.5">
+                    <div className="version-row-actions">
                       <button
                         type="button"
                         className="btn btn-secondary py-0.5 text-[10px]"
@@ -626,6 +670,38 @@ export function ResumeEditor() {
               </ul>
             )}
           </div>
+
+          {diagnostics.length > 0 && (
+            <div className="border-t border-[var(--color-line)] pt-2">
+              <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--color-muted)]">
+                Diagnostics ({diagnostics.length})
+              </p>
+              <ul className="max-h-28 space-y-1 overflow-y-auto">
+                {diagnostics.map((d, i) => (
+                  <li key={`${d.source}-${d.line}-${i}`}>
+                    <button
+                      type="button"
+                      className="w-full rounded bg-[var(--color-panel-2)] px-1.5 py-1 text-left text-[10px]"
+                      onClick={() => {
+                        setEditorTab('source')
+                        if (d.line != null) window.setTimeout(() => latexRef.current?.goToLine(d.line!), 40)
+                      }}
+                    >
+                      <span
+                        className={
+                          d.severity === 'error' ? 'text-[var(--color-danger)]' : 'text-[var(--color-warn)]'
+                        }
+                      >
+                        {d.severity}
+                      </span>
+                      {d.line != null && <span className="text-[var(--color-muted)]"> · L{d.line}</span>}
+                      <span className="mt-0.5 block text-[var(--color-soft)]">{d.message}</span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
 
           <div className="border-t border-[var(--color-line)] pt-2">
             <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--color-muted)]">
@@ -672,31 +748,54 @@ export function ResumeEditor() {
               </div>
             ) : (
               <p className="text-[10px] text-[var(--color-muted)]">
-                Use <strong className="font-medium text-[var(--color-soft)]">Check score</strong> in the header.
+                Use <strong className="font-medium text-[var(--color-soft)]">Check score</strong> in the toolbar.
               </p>
             )}
           </div>
         </aside>
 
+        {/* Editor column */}
         <section
-          className="flex min-h-0 flex-col overflow-hidden rounded border border-[var(--color-line)] xl:col-span-2"
-          style={{ background: isFormPath ? 'var(--color-panel)' : 'var(--editor-bg)' }}
+          className="flex min-h-0 flex-col overflow-hidden rounded border border-[var(--color-line)] xl:col-span-5"
+          style={{ background: showForm ? 'var(--color-panel)' : 'var(--editor-bg)' }}
+          data-editor-pane
         >
           <div
             className="flex shrink-0 items-center justify-between gap-2 border-b border-[var(--color-line)] px-2 py-1 text-[10px]"
             style={{ color: 'var(--editor-gutter-fg)' }}
           >
-            <div className="flex items-center gap-2">
-              <span className="font-medium text-[var(--color-soft)]">
-                {isFormPath ? 'Structured form' : 'LaTeX source'}
-              </span>
-              <span className="text-[var(--color-muted)]">
-                {isFormPath
-                  ? 'Fill form → AI Generate builds LaTeX (lint/compile loop) · Download .tex anytime'
-                  : 'Paste or edit .tex · layout stays yours'}
+            <div className="flex items-center gap-1">
+              {isFormPath ? (
+                <div className="flex gap-0.5" role="tablist" aria-label="Editor mode">
+                  <button
+                    type="button"
+                    role="tab"
+                    className="editor-tab"
+                    aria-selected={editorTab === 'form'}
+                    onClick={() => setEditorTab('form')}
+                  >
+                    Form
+                  </button>
+                  <button
+                    type="button"
+                    role="tab"
+                    className="editor-tab"
+                    aria-selected={editorTab === 'source'}
+                    onClick={() => setEditorTab('source')}
+                  >
+                    Source
+                  </button>
+                </div>
+              ) : (
+                <span className="font-medium text-[var(--color-soft)]">LaTeX source</span>
+              )}
+              <span className="ml-1 text-[var(--color-muted)]">
+                {showForm
+                  ? 'Fill form → AI Generate · then review Source'
+                  : 'Edit .tex · coach hunks highlight here'}
               </span>
             </div>
-            {isLatexOnly && (
+            {showSource && (
               <span className="flex gap-0.5">
                 <button
                   type="button"
@@ -719,8 +818,80 @@ export function ResumeEditor() {
               </span>
             )}
           </div>
+
+          {/* In-editor proposed diffs */}
+          {proposed?.hunks?.length && showSource ? (
+            <div className="editor-diff-strip shrink-0 p-2" data-editor-diff-strip role="region" aria-label="Editor diffs">
+              <div className="mb-1 flex flex-wrap items-center justify-between gap-1">
+                <p className="text-[10px] font-semibold text-[var(--color-warn)]">
+                  Proposed diffs · {nSel}/{proposed.hunks.length} selected · highlighted in source
+                </p>
+                <div className="flex flex-wrap gap-1">
+                  <button
+                    type="button"
+                    className="btn btn-warn py-0.5 text-[10px]"
+                    disabled={nSel === 0}
+                    data-apply-selected
+                    onClick={() => void applyEdit(selectedHunks)}
+                  >
+                    Apply selected ({nSel})
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-secondary py-0.5 text-[10px]"
+                    onClick={() => void applyEdit(defaultSelectedIndices(proposed.hunks.length))}
+                  >
+                    Apply all
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-secondary py-0.5 text-[10px]"
+                    onClick={() => {
+                      setProposed(null)
+                      setSelectedHunks([])
+                    }}
+                  >
+                    Dismiss
+                  </button>
+                </div>
+              </div>
+              <ul className="space-y-1">
+                {proposed.hunks.map((h, i) => {
+                  const on = selectedHunks.includes(i)
+                  return (
+                    <li
+                      key={i}
+                      className="rounded border border-[var(--color-line)] bg-[var(--color-panel)] px-1.5 py-1 font-mono text-[10px]"
+                      data-hunk-row={i}
+                    >
+                      <label className="flex cursor-pointer items-start gap-1.5">
+                        <input
+                          type="checkbox"
+                          className="mt-0.5"
+                          checked={on}
+                          onChange={() => toggleHunk(i)}
+                          aria-label={`Select hunk ${i + 1}`}
+                          data-hunk-checkbox={i}
+                        />
+                        <button
+                          type="button"
+                          className="min-w-0 flex-1 text-left"
+                          onClick={() => focusHunk(i)}
+                          title="Scroll to in editor"
+                        >
+                          <div className="text-[var(--color-danger)]">− {h.find.slice(0, 160)}</div>
+                          <div className="text-[var(--color-accent)]">+ {h.replace.slice(0, 160)}</div>
+                        </button>
+                      </label>
+                    </li>
+                  )
+                })}
+              </ul>
+            </div>
+          ) : null}
+
           <div className="min-h-0 flex-1">
-            {isFormPath ? (
+            {showForm ? (
               <div className="h-full overflow-auto bg-[var(--color-panel)] p-2">
                 <StructuredForm
                   value={structured}
@@ -740,12 +911,13 @@ export function ResumeEditor() {
                   setDirty(true)
                 }}
                 editorRef={latexRef}
+                hunkMarks={hunkMarks}
               />
             )}
           </div>
         </section>
 
-        <section className="flex min-h-0 flex-col overflow-hidden rounded border border-[var(--color-line)] xl:col-span-2">
+        <section className="flex min-h-0 flex-col overflow-hidden rounded border border-[var(--color-line)] xl:col-span-4">
           <PdfPreview data={pdfData} busy={previewBusy || generating} />
         </section>
       </div>
@@ -756,15 +928,24 @@ export function ResumeEditor() {
         coaching={coaching}
         chatReply={chatReply}
         proposed={proposed}
+        selectedHunks={selectedHunks}
+        onSelectedHunksChange={setSelectedHunks}
         onAction={(a) => void runCoach(a)}
-        onApply={() => void applyEdit()}
-        onDismiss={() => setProposed(null)}
+        onApplySelected={() => void applyEdit(selectedHunks)}
+        onApplyAll={() =>
+          void applyEdit(proposed ? defaultSelectedIndices(proposed.hunks.length) : [])
+        }
+        onDismiss={() => {
+          setProposed(null)
+          setSelectedHunks([])
+        }}
         hasUndoSrc={!!latexBackup}
         onUndoSrc={() => {
           setLatex(latexBackup)
           setDirty(true)
           toast.push('Restored previous LaTeX')
         }}
+        onFocusHunk={focusHunk}
       />
     </div>
   )

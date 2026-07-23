@@ -1,11 +1,19 @@
 import { useEffect, useRef } from 'react'
-import { Compartment, EditorState } from '@codemirror/state'
-import { EditorView, keymap, highlightActiveLine, lineNumbers } from '@codemirror/view'
+import { Compartment, EditorState, RangeSetBuilder, StateEffect, StateField } from '@codemirror/state'
+import {
+  Decoration,
+  EditorView,
+  keymap,
+  highlightActiveLine,
+  lineNumbers,
+  type DecorationSet,
+} from '@codemirror/view'
 import { defaultKeymap, history, historyKeymap, undo, redo } from '@codemirror/commands'
 import { StreamLanguage, syntaxHighlighting, HighlightStyle } from '@codemirror/language'
 import { tags } from '@lezer/highlight'
 import { searchKeymap, highlightSelectionMatches } from '@codemirror/search'
 import { useTheme } from '../theme'
+import type { HunkRange } from '../lib/hunks'
 
 const latexLanguage = StreamLanguage.define({
   token(stream) {
@@ -61,10 +69,47 @@ function editorTheme(theme: 'light' | 'dark') {
       '.cm-content': {
         caretColor: light ? '#0f172a' : '#aeafad',
       },
+      '.cm-hunk-selected': {
+        backgroundColor: light ? 'rgba(217, 119, 6, 0.28)' : 'rgba(245, 158, 11, 0.32)',
+        outline: light ? '1px solid rgba(217, 119, 6, 0.55)' : '1px solid rgba(245, 158, 11, 0.5)',
+      },
+      '.cm-hunk-dim': {
+        backgroundColor: light ? 'rgba(100, 116, 139, 0.18)' : 'rgba(100, 116, 139, 0.28)',
+        outline: '1px dashed rgba(100, 116, 139, 0.45)',
+      },
     },
     { dark: !light },
   )
 }
+
+const setHunkMarks = StateEffect.define<HunkRange[]>()
+
+const hunkMarkField = StateField.define<DecorationSet>({
+  create() {
+    return Decoration.none
+  },
+  update(value, tr) {
+    for (const e of tr.effects) {
+      if (e.is(setHunkMarks)) {
+        const builder = new RangeSetBuilder<Decoration>()
+        const sorted = [...e.value].sort((a, b) => a.from - b.from)
+        for (const r of sorted) {
+          if (r.to <= r.from) continue
+          const mark = Decoration.mark({
+            class: r.selected ? 'cm-hunk-selected' : 'cm-hunk-dim',
+          })
+          builder.add(r.from, r.to, mark)
+        }
+        return builder.finish()
+      }
+    }
+    if (tr.docChanged) {
+      return value.map(tr.changes)
+    }
+    return value
+  },
+  provide: (f) => EditorView.decorations.from(f),
+})
 
 export type LatexEditorHandle = {
   highlightRange: (from: number, to: number) => void
@@ -80,9 +125,11 @@ type Props = {
   value: string
   onChange: (v: string) => void
   editorRef?: React.MutableRefObject<LatexEditorHandle | null>
+  /** Ranges for coach proposed finds (in-editor diff highlights). */
+  hunkMarks?: HunkRange[]
 }
 
-export function LatexEditor({ value, onChange, editorRef }: Props) {
+export function LatexEditor({ value, onChange, editorRef, hunkMarks }: Props) {
   const { theme } = useTheme()
   const host = useRef<HTMLDivElement>(null)
   const viewRef = useRef<EditorView | null>(null)
@@ -90,7 +137,6 @@ export function LatexEditor({ value, onChange, editorRef }: Props) {
   const hlComp = useRef(new Compartment())
   const onChangeRef = useRef(onChange)
   onChangeRef.current = onChange
-  // Initial theme from DOM so first paint matches data-theme
   const initialTheme =
     (document.documentElement.getAttribute('data-theme') as 'light' | 'dark') || theme
 
@@ -105,6 +151,7 @@ export function LatexEditor({ value, onChange, editorRef }: Props) {
           highlightActiveLine(),
           history(),
           latexLanguage,
+          hunkMarkField,
           hlComp.current.of(syntaxHighlighting(highlightFor(initialTheme))),
           highlightSelectionMatches(),
           keymap.of([...defaultKeymap, ...historyKeymap, ...searchKeymap]),
@@ -179,8 +226,6 @@ export function LatexEditor({ value, onChange, editorRef }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // Apply editor theme on the same tick as theme state (do not wait for wipe).
-  // Wipe is visual-only; lagging CodeMirror behind the wipe felt slower than the screen.
   useEffect(() => {
     const view = viewRef.current
     if (!view) return
@@ -201,11 +246,18 @@ export function LatexEditor({ value, onChange, editorRef }: Props) {
     }
   }, [value])
 
+  useEffect(() => {
+    const view = viewRef.current
+    if (!view) return
+    view.dispatch({ effects: setHunkMarks.of(hunkMarks || []) })
+  }, [hunkMarks])
+
   return (
     <div
       ref={host}
       className="h-full min-h-0 w-full overflow-hidden"
       style={{ background: 'var(--editor-bg)' }}
+      data-editor-hunk-marks={hunkMarks?.length ? '1' : '0'}
     />
   )
 }

@@ -237,6 +237,71 @@ h3,
   font-size: 0.875rem;
   animation: toast-in 0.2s ease-out;
 }
+
+/* Editor workspace: toolbar groups + version rows + in-editor diffs */
+.ws-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+}
+.ws-toolbar-group {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem;
+  padding-left: 0.5rem;
+  border-left: 1px solid var(--color-line);
+}
+.ws-toolbar-group:first-child {
+  padding-left: 0;
+  border-left: none;
+}
+.ws-toolbar-label {
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-muted);
+  margin-right: 0.15rem;
+}
+.version-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.5rem;
+  align-items: center;
+  border-radius: 8px;
+  background: var(--color-panel-2);
+  border: 1px solid var(--color-line);
+  padding: 0.5rem 0.6rem;
+}
+.version-row-meta {
+  min-width: 0;
+}
+.version-row-actions {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  align-items: center;
+}
+.editor-diff-strip {
+  border-bottom: 1px solid color-mix(in srgb, var(--color-warn) 45%, var(--color-line));
+  background: color-mix(in srgb, var(--color-warn) 10%, var(--color-panel));
+  max-height: 11rem;
+  overflow: auto;
+}
+.editor-tab {
+  border-radius: 6px;
+  padding: 0.2rem 0.55rem;
+  font-size: 11px;
+  color: var(--color-muted);
+}
+.editor-tab[aria-selected='true'] {
+  background: var(--color-panel-2);
+  color: var(--color-text);
+  font-weight: 600;
+}
 @keyframes toast-in {
   from {
     opacity: 0;

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { defaultSelectedIndices } from '../lib/hunks'
 
 export const COACH_ACTIONS = [
   { id: 'improve_score', label: 'Improve score' },
@@ -18,11 +19,15 @@ type Props = {
   coaching: boolean
   chatReply: string
   proposed: ProposedEdit | null
+  selectedHunks: number[]
+  onSelectedHunksChange: (indices: number[]) => void
   onAction: (id: CoachActionId) => void
-  onApply: () => void
+  onApplySelected: () => void
+  onApplyAll: () => void
   onDismiss: () => void
   onUndoSrc?: () => void
   hasUndoSrc?: boolean
+  onFocusHunk?: (index: number) => void
 }
 
 const POS_KEY = 'resumeai_chat_pos'
@@ -33,11 +38,15 @@ export function CoachChat({
   coaching,
   chatReply,
   proposed,
+  selectedHunks,
+  onSelectedHunksChange,
   onAction,
-  onApply,
+  onApplySelected,
+  onApplyAll,
   onDismiss,
   onUndoSrc,
   hasUndoSrc,
+  onFocusHunk,
 }: Props) {
   const [minimized, setMinimized] = useState(false)
   const [pos, setPos] = useState(() => {
@@ -58,9 +67,19 @@ export function CoachChat({
     localStorage.setItem(POS_KEY, JSON.stringify(pos))
   }, [pos])
 
+  useEffect(() => {
+    if (proposed?.hunks?.length) {
+      onSelectedHunksChange(defaultSelectedIndices(proposed.hunks.length))
+    } else {
+      onSelectedHunksChange([])
+    }
+    // only when proposal identity changes
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [proposed])
+
   const onPointerDown = useCallback(
     (e: React.PointerEvent) => {
-      if ((e.target as HTMLElement).closest('button,textarea,input,a')) return
+      if ((e.target as HTMLElement).closest('button,textarea,input,a,label')) return
       drag.current = { ox: e.clientX, oy: e.clientY, sx: pos.x, sy: pos.y }
       ;(e.target as HTMLElement).setPointerCapture?.(e.pointerId)
     },
@@ -81,6 +100,14 @@ export function CoachChat({
     drag.current = null
   }, [])
 
+  function toggleHunk(i: number) {
+    if (selectedHunks.includes(i)) {
+      onSelectedHunksChange(selectedHunks.filter((x) => x !== i))
+    } else {
+      onSelectedHunksChange([...selectedHunks, i].sort((a, b) => a - b))
+    }
+  }
+
   if (minimized) {
     return (
       <button
@@ -96,6 +123,8 @@ export function CoachChat({
     )
   }
 
+  const nSel = selectedHunks.length
+
   return (
     <div
       className="fixed z-40 flex w-[min(22rem,calc(100vw-1rem))] flex-col overflow-hidden rounded-xl border border-[var(--color-line)] bg-[var(--color-panel)] shadow-xl"
@@ -110,17 +139,15 @@ export function CoachChat({
         onPointerUp={onPointerUp}
       >
         <span className="font-display text-sm font-semibold">Coach</span>
-        <div className="flex gap-1">
-          <button
-            type="button"
-            className="rounded px-2 py-0.5 text-xs text-[var(--color-muted)] hover:bg-[var(--color-line)]"
-            onClick={() => setMinimized(true)}
-            aria-label="Minimize coach"
-            title="Minimize"
-          >
-            —
-          </button>
-        </div>
+        <button
+          type="button"
+          className="rounded px-2 py-0.5 text-xs text-[var(--color-muted)] hover:bg-[var(--color-line)]"
+          onClick={() => setMinimized(true)}
+          aria-label="Minimize coach"
+          title="Minimize"
+        >
+          —
+        </button>
       </div>
       <div className="min-h-0 flex-1 space-y-2 overflow-y-auto p-3">
         <label className="label text-[10px]" htmlFor="coach-jd">
@@ -150,6 +177,7 @@ export function CoachChat({
         {!chatReply && !proposed && (
           <p className="text-[10px] leading-snug text-[var(--color-muted)]">
             Score first for better advice. Fixed actions only — coach proposes hunks you approve.
+            Select individual diffs in the editor strip or below.
           </p>
         )}
         {chatReply && (
@@ -162,22 +190,51 @@ export function CoachChat({
             className="rounded border border-[var(--color-warn)] bg-[color-mix(in_srgb,var(--color-warn)_8%,transparent)] p-1.5"
             role="region"
             aria-label="Proposed edits"
+            data-hunk-select="coach"
           >
             <p className="text-[10px] font-medium text-[var(--color-warn)]">
-              Proposed · {proposed.section} · {proposed.hunks.length} hunk
-              {proposed.hunks.length === 1 ? '' : 's'}
+              Proposed · {proposed.section} · {nSel}/{proposed.hunks.length} selected
             </p>
-            <ul className="mt-1 max-h-28 space-y-1 overflow-y-auto text-[10px]">
-              {proposed.hunks.map((h, i) => (
-                <li key={i} className="rounded bg-[var(--color-panel)] p-1 font-mono">
-                  <div className="text-[var(--color-danger)]">− {h.find.slice(0, 100)}</div>
-                  <div className="text-[var(--color-accent)]">+ {h.replace.slice(0, 100)}</div>
-                </li>
-              ))}
+            <ul className="mt-1 max-h-36 space-y-1 overflow-y-auto text-[10px]">
+              {proposed.hunks.map((h, i) => {
+                const on = selectedHunks.includes(i)
+                return (
+                  <li key={i} className="rounded bg-[var(--color-panel)] p-1 font-mono">
+                    <label className="flex cursor-pointer items-start gap-1.5">
+                      <input
+                        type="checkbox"
+                        className="mt-0.5"
+                        checked={on}
+                        onChange={() => toggleHunk(i)}
+                        aria-label={`Select hunk ${i + 1}`}
+                        data-hunk-checkbox={i}
+                      />
+                      <button
+                        type="button"
+                        className="min-w-0 flex-1 text-left"
+                        onClick={() => onFocusHunk?.(i)}
+                        title="Highlight in editor"
+                      >
+                        <div className="text-[var(--color-danger)]">− {h.find.slice(0, 120)}</div>
+                        <div className="text-[var(--color-accent)]">+ {h.replace.slice(0, 120)}</div>
+                      </button>
+                    </label>
+                  </li>
+                )
+              })}
             </ul>
             <div className="mt-1.5 flex flex-wrap gap-1">
-              <button type="button" onClick={onApply} className="btn btn-warn py-0.5 text-[10px]">
-                Approve & apply
+              <button
+                type="button"
+                onClick={onApplySelected}
+                className="btn btn-warn py-0.5 text-[10px]"
+                disabled={nSel === 0}
+                data-apply-selected
+              >
+                Apply selected ({nSel})
+              </button>
+              <button type="button" onClick={onApplyAll} className="btn btn-secondary py-0.5 text-[10px]">
+                Apply all
               </button>
               <button type="button" className="btn btn-secondary py-0.5 text-[10px]" onClick={onDismiss}>
                 Dismiss

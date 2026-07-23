@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { api, type Resume, type TemplateInfo } from '../api/client'
+import { api, type Resume } from '../api/client'
 import { useToast } from '../toast'
 
 export function ResumeList() {
@@ -11,8 +11,6 @@ export function ResumeList() {
   const [busy, setBusy] = useState(false)
   const [q, setQ] = useState('')
   const [tagFilter, setTagFilter] = useState<string[]>([])
-  const [templates, setTemplates] = useState<TemplateInfo[]>([])
-  const [pickerOpen, setPickerOpen] = useState(false)
 
   async function load() {
     try {
@@ -27,9 +25,6 @@ export function ResumeList() {
 
   useEffect(() => {
     void load()
-    void api<TemplateInfo[]>('/templates')
-      .then(setTemplates)
-      .catch(() => setTemplates([]))
   }, [])
 
   async function createLatex() {
@@ -44,7 +39,7 @@ export function ResumeList() {
             '\\documentclass{article}\n\\begin{document}\nYour name\n\\end{document}\n',
         }),
       })
-      toast.push('Resume created')
+      toast.push('LaTeX resume created')
       nav(`/resumes/${r.id}`)
     } catch (ex) {
       setErr(ex instanceof Error ? ex.message : 'Create failed')
@@ -53,19 +48,24 @@ export function ResumeList() {
     }
   }
 
-  async function createFromTemplate(t: TemplateInfo) {
+  async function createAiForm() {
     setBusy(true)
     try {
       const r = await api<Resume>('/resumes', {
         method: 'POST',
         body: JSON.stringify({
-          title: t.title,
-          track: 'latex',
-          template_id: t.id,
+          title: 'AI resume',
+          track: 'structured',
+          structured_json: {
+            basics: { name: '', email: '', summary: '' },
+            work: [],
+            education: [],
+            skills: [],
+            projects: [],
+          },
         }),
       })
-      toast.push(`Created from ${t.title}`)
-      setPickerOpen(false)
+      toast.push('AI resume created — fill the form, then AI Generate')
       nav(`/resumes/${r.id}`)
     } catch (ex) {
       setErr(ex instanceof Error ? ex.message : 'Create failed')
@@ -106,13 +106,13 @@ export function ResumeList() {
   })
 
   return (
-    <div>
+    <div data-create-flow="ai-first">
       <div className="mb-8 flex flex-wrap items-end justify-between gap-4">
         <div>
           <h1 className="font-display text-3xl font-semibold tracking-tight">Your resumes</h1>
           <p className="mt-1 text-sm text-[var(--color-soft)]">
             {items.length === 0
-              ? 'Create a blank LaTeX resume or start from a template'
+              ? 'Paste LaTeX or build with the form + AI Generate'
               : `${items.length} resume${items.length === 1 ? '' : 's'} · open one to score, coach, and compile`}
           </p>
         </div>
@@ -120,18 +120,20 @@ export function ResumeList() {
           <button
             type="button"
             disabled={busy}
-            onClick={() => void createLatex()}
+            onClick={() => void createAiForm()}
             className="btn btn-primary"
+            data-create-ai
           >
-            {busy ? 'Working…' : 'New LaTeX'}
+            {busy ? 'Working…' : 'New AI resume'}
           </button>
           <button
             type="button"
             disabled={busy}
-            onClick={() => setPickerOpen(true)}
+            onClick={() => void createLatex()}
             className="btn btn-secondary"
+            data-create-latex
           >
-            From template
+            New LaTeX
           </button>
         </div>
       </div>
@@ -194,24 +196,24 @@ export function ResumeList() {
         <div className="card flex flex-col items-center px-6 py-16 text-center">
           <p className="font-display text-lg font-medium">No resumes yet</p>
           <p className="mt-2 max-w-sm text-sm text-[var(--color-soft)]">
-            Create a blank LaTeX resume or start from a template.
+            Start with the form and <strong>AI Generate</strong>, or paste your own LaTeX.
           </p>
           <div className="mt-6 flex gap-2">
             <button
               type="button"
               className="btn btn-primary"
               disabled={busy}
-              onClick={() => void createLatex()}
+              onClick={() => void createAiForm()}
             >
-              New LaTeX
+              New AI resume
             </button>
             <button
               type="button"
               className="btn btn-secondary"
               disabled={busy}
-              onClick={() => setPickerOpen(true)}
+              onClick={() => void createLatex()}
             >
-              From template
+              New LaTeX
             </button>
           </div>
         </div>
@@ -268,58 +270,6 @@ export function ResumeList() {
             </li>
           ))}
         </ul>
-      )}
-
-      {pickerOpen && (
-        <>
-          <button
-            type="button"
-            className="fixed inset-0 z-40 bg-black/40"
-            aria-label="Close template picker"
-            onClick={() => setPickerOpen(false)}
-          />
-          <div
-            className="fixed left-1/2 top-1/2 z-50 w-[min(28rem,92vw)] -translate-x-1/2 -translate-y-1/2 rounded-lg border border-[var(--color-line)] bg-[var(--color-panel)] p-4 shadow-xl"
-            role="dialog"
-            aria-modal="true"
-            aria-label="Pick template"
-          >
-            <div className="mb-3 flex items-center justify-between">
-              <h2 className="font-display text-lg font-semibold">From template</h2>
-              <button
-                type="button"
-                className="text-sm text-[var(--color-muted)]"
-                onClick={() => setPickerOpen(false)}
-              >
-                ✕
-              </button>
-            </div>
-            <p className="mb-3 text-xs text-[var(--color-muted)]">
-              Copies the template LaTeX into a new resume you can edit.
-            </p>
-            {templates.length === 0 ? (
-              <p className="text-sm text-[var(--color-muted)]">No templates found.</p>
-            ) : (
-              <ul className="max-h-72 space-y-1.5 overflow-y-auto">
-                {templates.map((t) => (
-                  <li key={t.id}>
-                    <button
-                      type="button"
-                      className="btn btn-secondary w-full justify-start text-left"
-                      disabled={busy}
-                      onClick={() => void createFromTemplate(t)}
-                    >
-                      {t.title}
-                      <span className="ml-auto font-mono text-[10px] text-[var(--color-muted)]">
-                        {t.id}
-                      </span>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-        </>
       )}
     </div>
   )

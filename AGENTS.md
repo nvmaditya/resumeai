@@ -49,19 +49,21 @@ backend\.venv\Scripts\python.exe scripts\install_hooks.py   # once per clone
 
 ### Agent checklist after implementable work
 
-1. Pass the **done gate** above (`scripts/verify_before_done.py`).
-2. Commit with conventional message (`feat:`, `fix:`, `docs:`, `chore:`).
-3. Tag if this is a shippable slice:
+1. **Update `README.md` before every commit** so it matches the product you are about to ship (features, create flow, editor UX, env). Do not leave stale layout/feature claims.
+2. Pass the **done gate** above (`scripts/verify_before_done.py`).
+3. Commit with conventional message (`feat:`, `fix:`, `docs:`, `chore:`).
+4. Tag if this is a shippable slice:
    ```bash
    git tag -a vX.Y.Z -m "vX.Y.Z — short summary"
    ```
-4. Push branch **and** tags:
+5. Push branch **and** tags:
    ```bash
    git push -u origin HEAD
    git push origin vX.Y.Z
    # or: git push origin --tags
    ```
-5. Update this table when adding a release:
+6. Append to `LESSONS.md` if you repeated a mistake or the user had to ask twice for the same intent.
+7. Update this table when adding a release:
 
 | Version | Summary |
 |---------|---------|
@@ -74,6 +76,7 @@ backend\.venv\Scripts\python.exe scripts\install_hooks.py   # once per clone
 | v0.7.0 | Path split: paste LaTeX vs form-only templates + meta.json skill |
 | v0.8.0 | AI form→LaTeX LangGraph loop, floating coach, header actions, version delete |
 | v0.8.1 | Generate used_llm honesty + HTTP coach.complete path test |
+| v0.9.0 | Editor UX overhaul, selective in-editor hunks, AI-first create, LESSONS |
 
 ### Repo
 
