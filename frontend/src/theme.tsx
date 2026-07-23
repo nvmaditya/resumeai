@@ -63,7 +63,9 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     const prev = theme
     const next: Theme = theme === 'light' ? 'dark' : 'light'
 
-    // Instant: button label + data-theme (via useEffect)
+    // Instant: data-theme + React theme (CodeMirror listens to theme same tick)
+    apply(next)
+    localStorage.setItem('theme', next)
     setTheme(next)
 
     if (prefersReducedMotion()) {

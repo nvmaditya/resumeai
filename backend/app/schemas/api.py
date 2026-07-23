@@ -149,3 +149,19 @@ class ChatResponse(BaseModel):
 class ApplyEditRequest(BaseModel):
     section: str
     hunks: list[EditHunk] = Field(default_factory=list)
+
+
+class GenerateRequest(BaseModel):
+    """Optional structured override; else resume.structured_json is used."""
+
+    structured_json: Optional[dict[str, Any]] = None
+    title: Optional[str] = None
+
+
+class GenerateResponse(BaseModel):
+    latex_body: str
+    status: str
+    iterations: int
+    diagnostics: list[dict[str, Any]] = Field(default_factory=list)
+    error: Optional[str] = None
+    skill_loaded: bool = False

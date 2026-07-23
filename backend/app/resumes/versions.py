@@ -84,3 +84,25 @@ def read_version_body(store: ObjectStore, user_id: str, resume_id: str, vid: str
     if not store.exists(key):
         return None
     return store.get(key).decode("utf-8", errors="replace")
+
+
+def delete_version(
+    store: ObjectStore, user_id: str, resume_id: str, vid: str
+) -> bool:
+    """Remove one checkpoint from index + blob. Returns False if not found."""
+    versions = _load_index(store, user_id, resume_id)
+    found = None
+    kept: list[dict[str, Any]] = []
+    for v in versions:
+        if v.get("id") == vid:
+            found = v
+        else:
+            kept.append(v)
+    if not found:
+        return False
+    try:
+        store.delete(_blob_key(user_id, resume_id, vid))
+    except Exception:
+        pass
+    _save_index(store, user_id, resume_id, kept)
+    return True

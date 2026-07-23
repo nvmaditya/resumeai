@@ -72,6 +72,7 @@ backend\.venv\Scripts\python.exe scripts\install_hooks.py   # once per clone
 | v0.6.0 | Undo/redo, latex commits, settings profile, GitHub score cache |
 | v0.6.1 | .tex download, template SoT, API errors, UX polish (DESIGN) |
 | v0.7.0 | Path split: paste LaTeX vs form-only templates + meta.json skill |
+| v0.8.0 | AI form→LaTeX LangGraph loop, floating coach, header actions, version delete |
 
 ### Repo
 

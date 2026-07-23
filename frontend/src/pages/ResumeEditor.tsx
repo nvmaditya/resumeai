@@ -19,14 +19,8 @@ import {
   toApi,
   type StructuredResume,
 } from '../components/StructuredForm'
+import { CoachChat, type CoachActionId } from '../components/CoachChat'
 import { useToast } from '../toast'
-
-const COACH_ACTIONS = [
-  { id: 'improve_score', label: 'Improve score' },
-  { id: 'strengthen_projects', label: 'Strengthen projects' },
-  { id: 'align_jd', label: 'Align to JD' },
-  { id: 'quantify_impact', label: 'Quantify impact' },
-] as const
 
 type EditHunk = { find: string; replace: string }
 type ProposedEdit = { section: string; before?: string; hunks: EditHunk[] }
@@ -48,6 +42,7 @@ export function ResumeEditor() {
   const [status, setStatus] = useState('')
   const [scoring, setScoring] = useState(false)
   const [coaching, setCoaching] = useState(false)
+  const [generating, setGenerating] = useState(false)
   const [dirty, setDirty] = useState(false)
   const [hasPdf, setHasPdf] = useState(false)
   const [pdfData, setPdfData] = useState<ArrayBuffer | null>(null)
@@ -108,13 +103,13 @@ export function ResumeEditor() {
       .filter(Boolean)
   }
 
-  // Path 1: paste LaTeX (no template_id) → editor only.
-  // Path 2: template → form only (fills .tex on save).
-  const isTemplate = !!resume?.template_id
+  // Form path: template or structured with form data → AI generate primary
+  const isFormPath = !!resume?.template_id || resume?.track === 'structured'
+  const isLatexOnly = !!resume && !isFormPath
 
   async function save(opts?: { quiet?: boolean }) {
     const tags = parseTags(tagsText)
-    const body: Record<string, unknown> = isTemplate
+    const body: Record<string, unknown> = isFormPath
       ? { title, structured_json: toApi(structured), tags }
       : { title, latex_body: latex, tags }
     const r = await api<Resume>(`/resumes/${id}`, {
@@ -133,7 +128,7 @@ export function ResumeEditor() {
   }
 
   async function runLint() {
-    if (isTemplate || !latex.trim()) return
+    if (!latex.trim()) return
     setLinting(true)
     try {
       if (dirty) await save()
@@ -158,9 +153,7 @@ export function ResumeEditor() {
       compilingRef.current = true
       setPreviewBusy(true)
       try {
-        if (dirty) {
-          await save({ quiet: true })
-        }
+        if (dirty) await save({ quiet: true })
         const out = await api<{
           message: string
           bytes?: number
@@ -182,14 +175,49 @@ export function ResumeEditor() {
         compilingRef.current = false
       }
     },
-    [dirty, id, latex, resume, structured, tagsText, title, toast],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [dirty, id, latex, structured, tagsText, title, toast, isFormPath],
   )
 
   useEffect(() => {
     if (!resume) return
-    const t = window.setTimeout(() => void compileAndPreview({ quiet: true }), 1000)
+    const t = window.setTimeout(() => void compileAndPreview({ quiet: true }), 1200)
     return () => window.clearTimeout(t)
-  }, [isTemplate ? structured : latex, title])
+  }, [isFormPath ? structured : latex, title])
+
+  async function generateLatex() {
+    setGenerating(true)
+    try {
+      if (dirty) await save({ quiet: true })
+      const out = await api<{
+        latex_body: string
+        status: string
+        iterations: number
+        diagnostics?: LintDiagnostic[]
+        error?: string | null
+      }>(`/resumes/${id}/generate`, {
+        method: 'POST',
+        body: JSON.stringify({ structured_json: toApi(structured), title }),
+      })
+      setLatex(out.latex_body || '')
+      setDiagnostics((out.diagnostics as LintDiagnostic[]) || [])
+      setDirty(false)
+      const r = await api<Resume>(`/resumes/${id}`)
+      setResume(r)
+      if (out.status === 'ok') {
+        toast.push(`LaTeX generated · ${out.iterations} repair pass(es)`)
+        setStatus(`Generated · ok · ${out.iterations} iter`)
+        await compileAndPreview({ quiet: true })
+      } else {
+        toast.push(out.error || 'Generate finished with lint/compile issues')
+        setStatus(out.error || 'Generate failed quality loop')
+      }
+    } catch (ex) {
+      toast.push(ex instanceof Error ? ex.message : 'Generate failed')
+    } finally {
+      setGenerating(false)
+    }
+  }
 
   async function downloadPdf() {
     try {
@@ -213,8 +241,7 @@ export function ResumeEditor() {
 
   async function loadVersions() {
     try {
-      const list = await api<LatexVersion[]>(`/resumes/${id}/versions`)
-      setVersions(list)
+      setVersions(await api<LatexVersion[]>(`/resumes/${id}/versions`))
     } catch {
       setVersions([])
     }
@@ -227,10 +254,13 @@ export function ResumeEditor() {
   async function commitVersion() {
     if (dirty) await save()
     try {
-      const out = await api<{ unchanged?: boolean; version?: LatexVersion }>(`/resumes/${id}/versions`, {
-        method: 'POST',
-        body: JSON.stringify({ message: commitMsg || 'checkpoint' }),
-      })
+      const out = await api<{ unchanged?: boolean; version?: LatexVersion }>(
+        `/resumes/${id}/versions`,
+        {
+          method: 'POST',
+          body: JSON.stringify({ message: commitMsg || 'checkpoint' }),
+        },
+      )
       if (out.unchanged) toast.push('No changes since last commit')
       else toast.push('Version saved')
       setCommitMsg('')
@@ -242,7 +272,10 @@ export function ResumeEditor() {
 
   async function restoreVersion(vid: string) {
     try {
-      const r = await api<Resume>(`/resumes/${id}/versions/${vid}/restore`, { method: 'POST', body: '{}' })
+      const r = await api<Resume>(`/resumes/${id}/versions/${vid}/restore`, {
+        method: 'POST',
+        body: '{}',
+      })
       setResume(r)
       setLatex(r.latex_body || '')
       setDirty(false)
@@ -250,6 +283,17 @@ export function ResumeEditor() {
       void compileAndPreview({ quiet: true })
     } catch (ex) {
       toast.push(ex instanceof Error ? ex.message : 'Restore failed')
+    }
+  }
+
+  async function deleteVersion(vid: string, message: string) {
+    if (!confirm(`Delete checkpoint “${message.slice(0, 40)}”?`)) return
+    try {
+      await api(`/resumes/${id}/versions/${vid}`, { method: 'DELETE' })
+      toast.push('Checkpoint deleted')
+      await loadVersions()
+    } catch (ex) {
+      toast.push(ex instanceof Error ? ex.message : 'Delete failed')
     }
   }
 
@@ -273,7 +317,6 @@ export function ResumeEditor() {
           const eng = cur.result_json as {
             engine?: string
             duration_ms?: number
-            github_enriched?: boolean
             github_cache?: string
           } | null
           setStatus(
@@ -283,7 +326,7 @@ export function ResumeEditor() {
           )
           toast.push(
             cur.status === 'complete'
-              ? `Score: ${cur.result_json?.overall_score ?? '—'} (gh ${eng?.github_cache || '—'})`
+              ? `Score: ${cur.result_json?.overall_score ?? '—'}`
               : `Score failed: ${cur.error || ''}`,
           )
           break
@@ -301,7 +344,7 @@ export function ResumeEditor() {
     }
   }
 
-  async function runCoach(action: (typeof COACH_ACTIONS)[number]['id']) {
+  async function runCoach(action: CoachActionId) {
     setCoaching(true)
     try {
       const out = await api<{ reply: string; proposed_edit: ProposedEdit | null }>(
@@ -334,7 +377,7 @@ export function ResumeEditor() {
         body: JSON.stringify({ section: proposed.section, hunks: proposed.hunks }),
       })
       setResume(r)
-      if (r.track === 'latex') setLatex(r.latex_body || prev)
+      if (r.latex_body != null) setLatex(r.latex_body || prev)
       else setStructured(fromApi(r.structured_json as Record<string, unknown>))
       setProposed(null)
       setDirty(false)
@@ -390,17 +433,21 @@ export function ResumeEditor() {
     | { engine?: string; github_enriched?: boolean; duration_ms?: number }
     | null
     | undefined
-  const hasLatexSource = !!(resume.latex_body || resume.track === 'latex' || resume.template_id)
-  const scoreLabel = job?.status === 'complete' || job?.status === 'failed' ? 'Re-check score' : 'Check score'
+  const hasLatexSource = !!(resume.latex_body || resume.track === 'latex' || latex)
+  const scoreLabel =
+    job?.status === 'complete' || job?.status === 'failed' ? 'Re-check score' : 'Check score'
+
+  const actionBtn = 'btn btn-secondary py-1 text-[11px] shrink-0'
 
   return (
-    <div className="flex h-[calc(100vh-3.5rem)] flex-col gap-1.5">
+    <div className="relative flex h-[calc(100vh-3.5rem)] flex-col gap-1.5">
+      {/* Header: title, tags, then Actions to the right of tags */}
       <div className="flex shrink-0 flex-wrap items-center gap-2 rounded-lg border border-[var(--color-line)] bg-[var(--color-panel)] px-2.5 py-1.5">
         <Link to="/" className="text-xs text-[var(--color-muted)] hover:text-[var(--color-text)]">
           ← Resumes
         </Link>
         <input
-          className="input max-w-xs py-1 text-sm font-semibold"
+          className="input max-w-[12rem] py-1 text-sm font-semibold"
           value={title}
           onChange={(e) => {
             setTitle(e.target.value)
@@ -417,13 +464,11 @@ export function ResumeEditor() {
           </span>
         )}
         {dirty ? (
-          <span className="chip border-[var(--color-warn)] text-[var(--color-warn)]" title="Unsaved changes">
-            Unsaved
-          </span>
+          <span className="chip border-[var(--color-warn)] text-[var(--color-warn)]">Unsaved</span>
         ) : (
           <span className="text-[10px] text-[var(--color-muted)]">Saved</span>
         )}
-        <label className="flex min-w-0 flex-1 items-center gap-1 text-[10px] text-[var(--color-muted)]">
+        <label className="flex min-w-[8rem] max-w-xs flex-1 items-center gap-1 text-[10px] text-[var(--color-muted)]">
           Tags
           <input
             className="input min-w-0 flex-1 py-0.5 text-[11px]"
@@ -436,87 +481,80 @@ export function ResumeEditor() {
             aria-label="Resume tags"
           />
         </label>
+        <div className="flex flex-wrap items-center gap-1 border-l border-[var(--color-line)] pl-2" role="toolbar" aria-label="Actions">
+          <button type="button" onClick={() => void save()} className={actionBtn}>
+            Save
+          </button>
+          {isFormPath && (
+            <button
+              type="button"
+              onClick={() => void generateLatex()}
+              className="btn btn-primary py-1 text-[11px] shrink-0"
+              disabled={generating}
+            >
+              {generating ? 'Generating…' : 'AI Generate'}
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => void compileAndPreview()}
+            className="btn btn-primary py-1 text-[11px] shrink-0"
+            disabled={previewBusy}
+          >
+            {previewBusy ? '…' : 'Compile'}
+          </button>
+          {isLatexOnly && (
+            <button type="button" onClick={() => void runLint()} className={actionBtn} disabled={linting}>
+              {linting ? '…' : 'Lint'}
+            </button>
+          )}
+          <button type="button" onClick={() => void downloadPdf()} className={actionBtn}>
+            PDF
+          </button>
+          {hasLatexSource && (
+            <button type="button" onClick={() => void downloadTex()} className={actionBtn}>
+              .tex
+            </button>
+          )}
+          <button type="button" onClick={() => void score()} className={actionBtn} disabled={scoring}>
+            {scoring ? '…' : scoreLabel}
+          </button>
+          <button type="button" onClick={() => void remove()} className="btn btn-danger py-1 text-[11px] shrink-0">
+            Delete
+          </button>
+        </div>
       </div>
+      {status && (
+        <p className="px-1 text-[10px] text-[var(--color-soft)]" role="status">
+          {status}
+        </p>
+      )}
 
       <div className="grid min-h-0 flex-1 grid-cols-1 gap-1.5 xl:grid-cols-5">
         <aside className="flex min-h-0 flex-col gap-1.5 overflow-y-auto rounded border border-[var(--color-line)] bg-[var(--color-panel)] p-2 xl:col-span-1">
-          <p className="section-title mb-1">Actions</p>
-          <div className="flex flex-col gap-1">
-            <button type="button" onClick={() => void save()} className="btn btn-secondary w-full py-1.5 text-xs">
-              Save
-            </button>
-            <button
-              type="button"
-              onClick={() => void compileAndPreview()}
-              className="btn btn-primary w-full py-1.5 text-xs"
-              disabled={previewBusy}
-            >
-              {previewBusy ? 'Compiling…' : 'Compile'}
-            </button>
-            {!isTemplate && (
-              <button
-                type="button"
-                onClick={() => void runLint()}
-                className="btn btn-secondary w-full py-1.5 text-xs"
-                disabled={linting}
-              >
-                {linting ? 'Linting…' : 'Lint LaTeX'}
-              </button>
-            )}
-            <button type="button" onClick={() => void downloadPdf()} className="btn btn-secondary w-full py-1.5 text-xs">
-              Download PDF
-            </button>
-            {hasLatexSource && (
-              <button type="button" onClick={() => void downloadTex()} className="btn btn-secondary w-full py-1.5 text-xs">
-                Download .tex
-              </button>
-            )}
-            <button
-              type="button"
-              onClick={() => void score()}
-              className="btn btn-secondary w-full py-1.5 text-xs"
-              disabled={scoring}
-            >
-              {scoring ? 'Scoring…' : scoreLabel}
-            </button>
-            <button type="button" onClick={() => void remove()} className="btn btn-danger w-full py-1.5 text-xs">
-              Delete
-            </button>
-          </div>
-          {status && (
-            <p className="text-[10px] leading-snug text-[var(--color-soft)]" role="status">
-              {status}
-            </p>
-          )}
-
           {diagnostics.length > 0 && (
-            <div className="border-t border-[var(--color-line)] pt-2">
+            <div>
               <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--color-muted)]">
-                Lint ({diagnostics.length})
+                Diagnostics ({diagnostics.length})
               </p>
-              <ul className="max-h-36 space-y-1 overflow-y-auto">
+              <ul className="max-h-28 space-y-1 overflow-y-auto">
                 {diagnostics.map((d, i) => (
                   <li key={`${d.source}-${d.line}-${i}`}>
                     <button
                       type="button"
-                      className="w-full rounded bg-[var(--color-panel-2)] px-1.5 py-1 text-left text-[10px] leading-snug hover:ring-1 hover:ring-[var(--color-line)]"
+                      className="w-full rounded bg-[var(--color-panel-2)] px-1.5 py-1 text-left text-[10px]"
                       onClick={() => {
                         if (d.line != null) latexRef.current?.goToLine(d.line)
                       }}
                     >
                       <span
                         className={
-                          d.severity === 'error'
-                            ? 'text-[var(--color-danger)]'
-                            : 'text-amber-600'
+                          d.severity === 'error' ? 'text-[var(--color-danger)]' : 'text-[var(--color-warn)]'
                         }
                       >
                         {d.severity}
                       </span>
-                      {d.line != null && (
-                        <span className="text-[var(--color-muted)]"> · L{d.line}</span>
-                      )}
-                      <span className="text-[var(--color-muted)]"> · {d.source}</span>
+                      {d.line != null && <span className="text-[var(--color-muted)]"> · L{d.line}</span>}
                       <span className="mt-0.5 block text-[var(--color-soft)]">{d.message}</span>
                     </button>
                   </li>
@@ -527,10 +565,7 @@ export function ResumeEditor() {
 
           <div className="border-t border-[var(--color-line)] pt-2">
             <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--color-muted)]">
-              Version history
-            </p>
-            <p className="mb-1 text-[10px] text-[var(--color-muted)]">
-              Snapshot LaTeX with a message (like a commit). Restore anytime.
+              Versions
             </p>
             <div className="flex gap-1">
               <input
@@ -543,18 +578,12 @@ export function ResumeEditor() {
                   if (e.key === 'Enter') void commitVersion()
                 }}
               />
-              <button
-                type="button"
-                className="btn btn-secondary shrink-0 py-1 text-[11px]"
-                onClick={() => void commitVersion()}
-              >
+              <button type="button" className="btn btn-secondary shrink-0 py-1 text-[11px]" onClick={() => void commitVersion()}>
                 Commit
               </button>
             </div>
             {versions.length === 0 ? (
-              <p className="mt-1.5 text-[10px] text-[var(--color-soft)]">
-                No versions yet — commit to save a checkpoint.
-              </p>
+              <p className="mt-1.5 text-[10px] text-[var(--color-soft)]">No checkpoints yet.</p>
             ) : (
               <ul className="mt-1.5 max-h-40 space-y-1 overflow-y-auto">
                 {versions.map((v) => (
@@ -563,26 +592,33 @@ export function ResumeEditor() {
                     className="flex items-start justify-between gap-1 rounded bg-[var(--color-panel-2)] px-1.5 py-1"
                   >
                     <div className="min-w-0 flex-1">
-                      <p className="truncate text-[11px] font-medium text-[var(--color-text)]" title={v.message}>
+                      <p className="truncate text-[11px] font-medium" title={v.message}>
                         {v.message || 'checkpoint'}
                       </p>
                       <p className="text-[10px] text-[var(--color-muted)]">
                         {new Date(v.created_at).toLocaleString()}
-                        {v.size != null ? ` · ${v.size} B` : ''}
                       </p>
                     </div>
-                    <button
-                      type="button"
-                      className="btn btn-secondary shrink-0 py-0.5 text-[10px]"
-                      title="Replace current source with this version"
-                      onClick={() => {
-                        if (confirm(`Restore version “${(v.message || 'checkpoint').slice(0, 60)}”?`)) {
-                          void restoreVersion(v.id)
-                        }
-                      }}
-                    >
-                      Restore
-                    </button>
+                    <div className="flex shrink-0 flex-col gap-0.5">
+                      <button
+                        type="button"
+                        className="btn btn-secondary py-0.5 text-[10px]"
+                        onClick={() => {
+                          if (confirm(`Restore “${(v.message || '').slice(0, 40)}”?`)) {
+                            void restoreVersion(v.id)
+                          }
+                        }}
+                      >
+                        Restore
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-danger py-0.5 text-[10px]"
+                        onClick={() => void deleteVersion(v.id, v.message || 'checkpoint')}
+                      >
+                        Delete
+                      </button>
+                    </div>
                   </li>
                 ))}
               </ul>
@@ -599,22 +635,19 @@ export function ResumeEditor() {
                 {meta?.engine && (
                   <p className="text-[10px] text-[var(--color-muted)]">
                     Engine: {meta.engine}
-                    {meta.github_enriched ? ' · GitHub enriched' : ' · no GitHub'}
+                    {meta.github_enriched ? ' · GitHub' : ''}
                     {meta.duration_ms != null ? ` · ${meta.duration_ms}ms` : ''}
                   </p>
                 )}
                 {job.result_json && job.status === 'complete' && (
                   <>
                     <div className="flex items-baseline gap-2">
-                      <p
-                        className="text-2xl font-semibold tabular-nums text-[var(--color-accent)]"
-                        aria-label={`Overall score ${overall ?? 'unavailable'}`}
-                      >
+                      <p className="text-2xl font-semibold tabular-nums text-[var(--color-accent)]">
                         {overall ?? '—'}
                       </p>
-                      <span className="text-[10px] text-[var(--color-muted)]">/ 100 overall</span>
+                      <span className="text-[10px] text-[var(--color-muted)]">/ 100</span>
                     </div>
-                    <ul className="max-h-40 space-y-1 overflow-y-auto text-[10px]">
+                    <ul className="max-h-36 space-y-1 overflow-y-auto text-[10px]">
                       {cats.map((c) => (
                         <li key={c.name} className="rounded bg-[var(--color-panel-2)] px-1.5 py-1">
                           <div className="flex justify-between gap-1 font-medium">
@@ -626,9 +659,6 @@ export function ResumeEditor() {
                           )}
                         </li>
                       ))}
-                      {cats.length === 0 && (
-                        <li className="text-[var(--color-muted)]">No category breakdown.</li>
-                      )}
                     </ul>
                   </>
                 )}
@@ -639,98 +669,16 @@ export function ResumeEditor() {
                 )}
               </div>
             ) : (
-              <p className="text-[10px] leading-snug text-[var(--color-muted)]">
-                Run <strong className="font-medium text-[var(--color-soft)]">Check score</strong> for
-                hiring-agent results. Optional: set GitHub in Settings first.
+              <p className="text-[10px] text-[var(--color-muted)]">
+                Use <strong className="font-medium text-[var(--color-soft)]">Check score</strong> in the header.
               </p>
             )}
-          </div>
-
-          <div className="border-t border-[var(--color-line)] pt-2">
-            <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--color-muted)]">
-              Coach
-            </p>
-            <label className="label text-[10px]" htmlFor="jd-input">
-              Job description (optional)
-            </label>
-            <textarea
-              id="jd-input"
-              className="input h-14 resize-y text-[11px]"
-              placeholder="Paste JD to ground advice…"
-              maxLength={4000}
-              value={jd}
-              onChange={(e) => setJd(e.target.value)}
-            />
-            <div className="mt-1 flex flex-col gap-1">
-              {COACH_ACTIONS.map((a) => (
-                <button
-                  key={a.id}
-                  type="button"
-                  className="btn btn-primary w-full py-1 text-[11px]"
-                  disabled={coaching}
-                  onClick={() => void runCoach(a.id)}
-                >
-                  {coaching ? 'Working…' : a.label}
-                </button>
-              ))}
-            </div>
-            {!chatReply && !proposed && (
-              <p className="mt-1.5 text-[10px] leading-snug text-[var(--color-muted)]">
-                Score first for better advice. Coach proposes find/replace hunks you approve.
-              </p>
-            )}
-            {chatReply && (
-              <div className="mt-1.5 max-h-24 overflow-y-auto rounded bg-[var(--color-panel-2)] p-1.5 text-[10px] leading-snug text-[var(--color-soft)]">
-                {chatReply}
-              </div>
-            )}
-            {proposed?.hunks?.length ? (
-              <div
-                className="mt-1.5 rounded border border-[var(--color-warn)] bg-[color-mix(in_srgb,var(--color-warn)_8%,transparent)] p-1.5"
-                role="region"
-                aria-label="Proposed edits"
-              >
-                <p className="text-[10px] font-medium text-[var(--color-warn)]">
-                  Proposed edit · {proposed.section} · {proposed.hunks.length} hunk
-                  {proposed.hunks.length === 1 ? '' : 's'}
-                </p>
-                <ul className="mt-1 max-h-36 space-y-1 overflow-y-auto text-[10px]">
-                  {proposed.hunks.map((h, i) => (
-                    <li key={i} className="rounded bg-[var(--color-panel)] p-1 font-mono">
-                      <div className="text-[var(--color-danger)]">− {h.find.slice(0, 120)}</div>
-                      <div className="text-[var(--color-accent)]">+ {h.replace.slice(0, 120)}</div>
-                    </li>
-                  ))}
-                </ul>
-                <div className="mt-1.5 flex flex-wrap gap-1">
-                  <button type="button" onClick={() => void applyEdit()} className="btn btn-warn py-0.5 text-[10px]">
-                    Approve & apply
-                  </button>
-                  <button type="button" className="btn btn-secondary py-0.5 text-[10px]" onClick={() => setProposed(null)}>
-                    Dismiss
-                  </button>
-                  {latexBackup && (
-                    <button
-                      type="button"
-                      className="btn btn-secondary py-0.5 text-[10px]"
-                      onClick={() => {
-                        setLatex(latexBackup)
-                        setDirty(true)
-                        toast.push('Restored previous LaTeX')
-                      }}
-                    >
-                      Undo src
-                    </button>
-                  )}
-                </div>
-              </div>
-            ) : null}
           </div>
         </aside>
 
         <section
           className="flex min-h-0 flex-col overflow-hidden rounded border border-[var(--color-line)] xl:col-span-2"
-          style={{ background: isTemplate ? 'var(--color-panel)' : 'var(--editor-bg)' }}
+          style={{ background: isFormPath ? 'var(--color-panel)' : 'var(--editor-bg)' }}
         >
           <div
             className="flex shrink-0 items-center justify-between gap-2 border-b border-[var(--color-line)] px-2 py-1 text-[10px]"
@@ -738,37 +686,39 @@ export function ResumeEditor() {
           >
             <div className="flex items-center gap-2">
               <span className="font-medium text-[var(--color-soft)]">
-                {isTemplate ? 'Structured form' : 'LaTeX source'}
+                {isFormPath ? 'Structured form' : 'LaTeX source'}
               </span>
               <span className="text-[var(--color-muted)]">
-                {isTemplate
-                  ? 'Fields fill the template · empty omitted · Download .tex anytime after compile'
-                  : 'Paste or edit your .tex · no form (your layout stays yours)'}
+                {isFormPath
+                  ? 'Fill form → AI Generate builds LaTeX (lint/compile loop) · Download .tex anytime'
+                  : 'Paste or edit .tex · layout stays yours'}
               </span>
             </div>
-            {!isTemplate && (
-              <span className="flex gap-1">
+            {isLatexOnly && (
+              <span className="flex gap-0.5">
                 <button
                   type="button"
-                  className="rounded px-1.5 py-0.5 hover:bg-[var(--editor-active)]"
+                  className="rounded px-1.5 py-0.5 text-sm hover:bg-[var(--editor-active)]"
                   title="Undo"
+                  aria-label="Undo"
                   onClick={() => latexRef.current?.undo()}
                 >
-                  Undo
+                  ↶
                 </button>
                 <button
                   type="button"
-                  className="rounded px-1.5 py-0.5 hover:bg-[var(--editor-active)]"
+                  className="rounded px-1.5 py-0.5 text-sm hover:bg-[var(--editor-active)]"
                   title="Redo"
+                  aria-label="Redo"
                   onClick={() => latexRef.current?.redo()}
                 >
-                  Redo
+                  ↷
                 </button>
               </span>
             )}
           </div>
           <div className="min-h-0 flex-1">
-            {isTemplate ? (
+            {isFormPath ? (
               <div className="h-full overflow-auto bg-[var(--color-panel)] p-2">
                 <StructuredForm
                   value={structured}
@@ -794,9 +744,26 @@ export function ResumeEditor() {
         </section>
 
         <section className="flex min-h-0 flex-col overflow-hidden rounded border border-[var(--color-line)] xl:col-span-2">
-          <PdfPreview data={pdfData} busy={previewBusy} />
+          <PdfPreview data={pdfData} busy={previewBusy || generating} />
         </section>
       </div>
+
+      <CoachChat
+        jd={jd}
+        onJdChange={setJd}
+        coaching={coaching}
+        chatReply={chatReply}
+        proposed={proposed}
+        onAction={(a) => void runCoach(a)}
+        onApply={() => void applyEdit()}
+        onDismiss={() => setProposed(null)}
+        hasUndoSrc={!!latexBackup}
+        onUndoSrc={() => {
+          setLatex(latexBackup)
+          setDirty(true)
+          toast.push('Restored previous LaTeX')
+        }}
+      />
     </div>
   )
 }

@@ -16,3 +16,6 @@ requests>=2.32.0
 PyMuPDF>=1.26.0
 pymupdf4llm>=0.0.27
 python-dotenv>=1.0.0
+# form→LaTeX generate agent
+langgraph>=0.2.0
+langchain-core>=0.3.0

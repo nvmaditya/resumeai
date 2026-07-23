@@ -14,6 +14,8 @@ from app.schemas import (
     ApplyEditRequest,
     ChatRequest,
     ChatResponse,
+    GenerateRequest,
+    GenerateResponse,
     JobOut,
     LintRequest,
     LintResponse,
@@ -526,6 +528,62 @@ def commit_resume_version(
     if resume.latex_key and store.exists(resume.latex_key):
         latex = store.get(resume.latex_key).decode("utf-8", errors="replace")
     return commit_version(store, user.id, resume.id, latex, body.message or "")
+
+
+@router.delete("/{resume_id}/versions/{version_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_resume_version(
+    resume_id: str,
+    version_id: str,
+    user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+    store: ObjectStore = Depends(get_store),
+) -> None:
+    from app.resumes.versions import delete_version
+
+    resume = _load_owned(session, user, resume_id)
+    ok = delete_version(store, user.id, resume.id, version_id)
+    if not ok:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Version not found")
+
+
+@router.post("/{resume_id}/generate", response_model=GenerateResponse)
+def generate_resume_latex(
+    resume_id: str,
+    body: GenerateRequest = GenerateRequest(),
+    user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+    store: ObjectStore = Depends(get_store),
+) -> GenerateResponse:
+    """Form → LaTeX via LangGraph lint/compile agent; persist source on success or draft."""
+    from app.config import get_settings
+    from app.generate.agent import run_generate_agent
+
+    resume = _load_owned(session, user, resume_id)
+    structured = body.structured_json if body.structured_json is not None else resume.structured_json
+    if body.structured_json is not None:
+        resume.structured_json = body.structured_json
+    title = (body.title if body.title is not None else resume.title) or "Resume"
+    settings = get_settings()
+    use_stub = (settings.coach_backend or "").strip().lower() == "stub"
+    result = run_generate_agent(structured or {}, title=title, use_stub=use_stub)
+    key = resume.latex_key or _latex_key(user.id, resume.id)
+    store.put(key, (result.latex or "").encode("utf-8"))
+    resume.latex_key = key
+    # Keep track latex so preview/download work; form path stays structured SoT for regenerate
+    if resume.track == "structured" or resume.template_id:
+        resume.track = "latex" if not resume.template_id else resume.track
+    resume.updated_at = datetime.now(timezone.utc)
+    session.add(resume)
+    session.commit()
+    session.refresh(resume)
+    return GenerateResponse(
+        latex_body=result.latex,
+        status=result.status,
+        iterations=result.iterations,
+        diagnostics=result.diagnostics,
+        error=result.error,
+        skill_loaded=result.skill_loaded,
+    )
 
 
 @router.post("/{resume_id}/versions/{version_id}/restore", response_model=ResumeOut)

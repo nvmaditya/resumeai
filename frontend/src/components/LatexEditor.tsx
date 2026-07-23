@@ -83,7 +83,7 @@ type Props = {
 }
 
 export function LatexEditor({ value, onChange, editorRef }: Props) {
-  const { theme, wiping } = useTheme()
+  const { theme } = useTheme()
   const host = useRef<HTMLDivElement>(null)
   const viewRef = useRef<EditorView | null>(null)
   const themeComp = useRef(new Compartment())
@@ -179,9 +179,9 @@ export function LatexEditor({ value, onChange, editorRef }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // Skip CodeMirror reconfigure while wipe runs — main-thread work hitchs clip-path
+  // Apply editor theme on the same tick as theme state (do not wait for wipe).
+  // Wipe is visual-only; lagging CodeMirror behind the wipe felt slower than the screen.
   useEffect(() => {
-    if (wiping) return
     const view = viewRef.current
     if (!view) return
     view.dispatch({
@@ -190,7 +190,7 @@ export function LatexEditor({ value, onChange, editorRef }: Props) {
         hlComp.current.reconfigure(syntaxHighlighting(highlightFor(theme))),
       ],
     })
-  }, [theme, wiping])
+  }, [theme])
 
   useEffect(() => {
     const view = viewRef.current
